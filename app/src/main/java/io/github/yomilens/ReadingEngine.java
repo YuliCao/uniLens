@@ -109,7 +109,7 @@ public final class ReadingEngine {
       String surface = t.getSurface(), k = overrides.getOrDefault(surface, t.getReading());
       if (k == null || k.equals("*")) {
         k = surface;
-        uncertain |= surface.matches(".*[一-龯々].*");
+        uncertain |= JapaneseText.containsHan(surface);
       }
       kana.append(Romaji.hiragana(k));
       String phonetic = k;

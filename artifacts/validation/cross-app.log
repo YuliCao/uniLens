@@ -1,0 +1,4 @@
+PASS geometry: external-app, 4 Japanese lines
+PASS geometry: external-app-next, 4 Japanese lines
+PASS: foreground session, page changes through overlay, rotation, and lifecycle checks.
+Screenshots require visual review for text alignment.

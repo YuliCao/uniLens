@@ -107,6 +107,12 @@ public final class MainActivity extends Activity {
     title("显示与响应");
     addChoice("标注模式", new String[] {"罗马音", "振假名（平假名）", "原文 + 罗马音"}, "mode", 0);
     addChoice("扫描区域", new String[] {"全屏", "下半屏（游戏对话）", "中部（漫画 / 网页）", "自定义：启动后点「框选」"}, "region", 0);
+    CheckBox kanaOnly = new CheckBox(this);
+    kanaOnly.setText("只标注含假名的行（略过纯汉字菜单）");
+    kanaOnly.setChecked(Prefs.get(this).getBoolean("kanaOnly", false));
+    kanaOnly.setOnCheckedChangeListener(
+        (button, checked) -> Prefs.get(this).edit().putBoolean("kanaOnly", checked).apply());
+    content.addView(kanaOnly);
     TextView speedLabel = text("识别频率：静止画面自动降频", 14, 0xff566a70);
     content.addView(speedLabel);
     Spinner speed = new Spinner(this);

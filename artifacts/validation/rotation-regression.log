@@ -1,0 +1,26 @@
+PASS geometry: portrait, 4 Japanese lines
+PASS geometry: landscape, 4 Japanese lines
+PASS geometry: portrait-after-rotation, 4 Japanese lines
+PASS geometry: rotation-2-landscape, 4 Japanese lines
+PASS geometry: rotation-2-portrait, 4 Japanese lines
+PASS geometry: rotation-3-landscape, 4 Japanese lines
+PASS geometry: rotation-3-portrait, 4 Japanese lines
+PASS geometry: rotation-4-landscape, 4 Japanese lines
+PASS geometry: rotation-4-portrait, 4 Japanese lines
+PASS geometry: rotation-5-landscape, 4 Japanese lines
+PASS geometry: rotation-5-portrait, 4 Japanese lines
+PASS geometry: rotation-6-landscape, 4 Japanese lines
+PASS geometry: rotation-6-portrait, 4 Japanese lines
+PASS geometry: rotation-7-landscape, 4 Japanese lines
+PASS geometry: rotation-7-portrait, 4 Japanese lines
+PASS geometry: rotation-8-landscape, 4 Japanese lines
+PASS geometry: rotation-8-portrait, 4 Japanese lines
+PASS geometry: resumed, 4 Japanese lines
+PASS geometry: mode-kana, 4 Japanese lines
+PASS geometry: mode-original, 4 Japanese lines
+PASS geometry: mode-romaji, 4 Japanese lines
+PASS geometry: region-bottom, 1 Japanese lines
+PASS geometry: region-full, 4 Japanese lines
+PASS geometry: page-two, 4 Japanese lines
+PASS: foreground session, page changes through overlay, rotation, and lifecycle checks.
+Screenshots require visual review for text alignment.

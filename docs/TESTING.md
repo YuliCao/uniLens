@@ -1,4 +1,46 @@
-# 验证记录 · 0.1.0
+# 验证记录
+
+## 0.2.1 旋转修复与初版回归
+
+日期：2026-09-26。验证设备为 Android 15 / API 35 x86_64 模拟器，未连接 vivo 真机。
+
+- 修复旋转时虚拟显示与接收 Surface 的更新顺序：先提供新 Surface，再调用 `resize`。旧顺序存在竞态，系统可能按旧 Surface 尺寸计算缩放，产生留边、识别框错位及控制条误识别。仅增加等待时间仍能复现，未采用它作为根本修复。
+- 配置变化立即增加识别代次、清除旧标注；旋转过渡帧通过时间戳丢弃。每次 OCR 固定使用采样时的源尺寸和图像尺寸映射坐标。
+- 严格回归完成 8 轮横屏/竖屏往返，16 次方向变化。逐轮把四行日语识别框与 UI 中原文控件位置比较，出现非空但错位的结果立即失败；本轮全部通过。
+- 暂停清空标注、恢复、三种模式、下部区域框选、重新扩大区域、底层按钮切页、停止后释放 MediaProjection 全部通过。测试期间应用崩溃缓冲为空。
+- 23/23 JVM 测试通过；构建与 Lint 通过（0 errors / 15 warnings）。ARM64 和通用包签名通过，ARM64 ZIP 16 KB 对齐检查通过。
+- 最终断网设备测试 2/2 通过（11.076 秒）。内置 OCR 的 960 / 1280 / 1600 长边样本各运行 5 次，p50 为 535 / 504 / 573 ms；仍只是模拟器纯 OCR 数据。
+- 独立测试 APK（`io.github.yomilens.test`）前台显示日语，主应用服务在后台采集：两页各四行的位置检查通过，悬浮标注存在时点击外部应用按钮可正常切页。测试 APK 不随用户安装包分发。
+- 人工复核最后一轮横屏及假名模式截图，日语下划线与原文字行对应。纯汉字中文仍可能被日语模型识别，可开启“只标注含假名的行”过滤。
+- 本轮屏幕 OCR+读音耗时随主机负载约 1–3 秒，不能将历史较快数据当作固定实时指标；旋转还有约 0.9 秒稳定等待。未测试 vivo 功耗、温升或 OriginOS 保活。
+
+证据：`artifacts/validation/rotation-regression.json`、`rotation-regression.log`、`rotation-8-landscape.png`、`rotation-8-portrait.png`、`mode-*.png`、`region-*.png`。APK 位于 `artifacts/apk`，SHA256SUMS 可核对文件。
+
+跨应用独立回归记录为 `cross-app.json`、`cross-app.log`、`external-app*.png`，停止后共享会话为 null；断网设备测试输出为 `offline-021.log`。UI 脚本清理测试应用旧任务栈，避免重跑时继承上次页面。所有自动化仅允许 emulator 序列号。
+
+更新顺序分析依据为 Android 15 AOSP 的 [VirtualDisplayAdapter](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android15-release/services/core/java/com/android/server/display/VirtualDisplayAdapter.java) 与 [ContentRecorder](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android15-release/services/core/java/com/android/server/wm/ContentRecorder.java)：镜像变换会查询消费 Surface 的默认尺寸。
+
+增强回归命令（先安装通用 APK 和 androidTest APK）：
+
+```powershell
+python scripts/emulator_smoke.py --adb .tools/android-sdk/platform-tools/adb.exe --rotation-cycles 8
+python scripts/emulator_smoke.py --adb .tools/android-sdk/platform-tools/adb.exe --rotation-cycles 1 --external-fixture
+```
+
+## 0.2.0 增量验证（历史，已被 0.2.1 替代）
+
+- 最新截图复核发现横竖屏切换后仍会间歇出现标注错位及控制条被识别。0.2.0 属于实验构建，尚未通过旋转稳定性验收；下方自动化通过只证明流程和服务生命周期，不能证明标注位置正确。
+
+- 23/23 JVM 单元测试通过；`assembleDebug`、`assembleDebugAndroidTest`、`lintDebug` 通过（0 errors / 15 warnings）。
+- 断网设备测试仍为 2/2 通过。通用 APK 在 API 35 x86_64 模拟器运行；ARM64 APK 进行了架构、签名和打包检查，未在物理 ARM64 手机运行。
+- 新增纯假名行过滤、补充平面汉字检测、标注避让及连接线；渲染布局缓存减少重复绘制分配。
+- ImageReader 持续释放过期图像，只保留最新帧；采样时检查单调时钟时间戳，避免 UI 忙时读到隐藏悬浮层之前的帧。
+- 控制条保持显示，其像素在识别副本中被覆盖。受控制条遮挡的识别框跳过，默认控制条靠右以减少覆盖正文。
+- 区域框选后确认得到四行日语标注，无崩溃；样本诊断帧龄为 10–40 ms。帧龄不是 OCR 或端到端延迟。
+- 通用包约 61 MB，ARM64 包约 31 MB。ARM64 OCR 原生库的所有 PT_LOAD 段为 16384 字节对齐；这只是文件检查，不等于 Android 16 真机测试。
+- APK 校验和位于 `artifacts/apk/SHA256SUMS.txt`。最新 UI 自动化截图保存在 `artifacts/validation`，历史 0.1.0 证据可在 Git 首次提交查看。
+
+## 0.1.0 基线
 
 日期：2026-09-26（Asia/Shanghai）。开发签名 APK，非应用商店正式发行。
 

@@ -15,6 +15,8 @@ import android.widget.*;
 import com.google.mlkit.vision.common.InputImage;
 import com.google.mlkit.vision.text.*;
 import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions;
+import java.io.FileDescriptor;
+import java.io.PrintWriter;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -28,6 +30,8 @@ public final class CaptureService extends Service {
   private MediaProjection projection;
   private VirtualDisplay display;
   private ImageReader reader;
+  // Worker-owned latest frame. Drain the producer continuously to avoid queued stale frames.
+  private Image latestImage;
   private TextRecognizer recognizer;
   private ReadingEngine readings;
   private WindowManager wm;
@@ -46,7 +50,15 @@ public final class CaptureService extends Service {
   private String dictionary = "\u0000";
   private int lastRegion = -1;
   private long scans = 0, skips = 0;
+  private volatile long framesReceived = 0, lastOcrMs = 0;
+  private long hideAfterNanos = 0;
+  private boolean requireFreshFrame = false;
+  private volatile long sampledFrameAgeMs = 0;
+  // Discard animation/letterboxed frames while the display and capture surface settle.
+  private volatile long geometryReadyNanos;
+  private volatile String frameDetails = "";
   private View selector;
+  private volatile Rect controlBounds = new Rect();
   private final Runnable tick = this::beginSample;
 
   @Override
@@ -173,6 +185,16 @@ public final class CaptureService extends Service {
 
   private void createReader() {
     reader = ImageReader.newInstance(captureW, captureH, PixelFormat.RGBA_8888, 3);
+    reader.setOnImageAvailableListener(
+        source -> {
+          if (stopped || source != reader) return;
+          Image next = source.acquireLatestImage();
+          if (next == null) return;
+          framesReceived++;
+          if (latestImage != null) latestImage.close();
+          latestImage = next;
+        },
+        analysis);
   }
 
   private int dp(int n) {
@@ -217,7 +239,7 @@ public final class CaptureService extends Service {
     info.setTextColor(Color.WHITE);
     info.setTextSize(11);
     info.setPadding(dp(8), dp(10), dp(8), dp(10));
-    controls.addView(info);
+    controls.addView(info, new LinearLayout.LayoutParams(dp(92), -1));
     pauseButton =
         control(
             "暂停",
@@ -247,7 +269,8 @@ public final class CaptureService extends Service {
             dp(44),
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL);
-    controlParams.x = dp(8);
+    controls.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+    controlParams.x = Math.max(dp(8), screenW - controls.getMeasuredWidth() - dp(8));
     controlParams.y = dp(80);
     wm.addView(controls, controlParams);
     info.setOnTouchListener(
@@ -295,6 +318,11 @@ public final class CaptureService extends Service {
 
   private void beginSample() {
     if (stopped || paused || selecting) return;
+    long remaining = (geometryReadyNanos - System.nanoTime()) / 1_000_000L;
+    if (remaining > 0) {
+      schedule(remaining + 50);
+      return;
+    }
     if (!((PowerManager) getSystemService(POWER_SERVICE)).isInteractive() || MainActivity.visible) {
       overlay.setLabels(Collections.emptyList());
       schedule(1000);
@@ -305,21 +333,53 @@ public final class CaptureService extends Service {
       return;
     }
     // Exclude our own readings from OCR. Restore immediately after copying the frame.
+    int[] controlOrigin = new int[2];
+    controls.getLocationOnScreen(controlOrigin);
+    controlBounds =
+        new Rect(
+            controlOrigin[0],
+            controlOrigin[1],
+            controlOrigin[0] + controls.getWidth(),
+            controlOrigin[1] + controls.getHeight());
+    overlay.setControlBounds(controlBounds);
+    requireFreshFrame = overlay.labelCount() > 0;
     overlay.setVisibility(View.INVISIBLE);
-    controls.setAlpha(0f);
+    hideAfterNanos = System.nanoTime();
     int current = generation;
-    analysis.postDelayed(() -> capture(current), 80);
+    analysis.postDelayed(() -> capture(current, 0), 80);
   }
 
-  private void capture(int current) {
+  private void capture(int current, int attempt) {
     if (stopped || paused || selecting || current != generation) {
       restore();
       finishFrame(200);
       return;
     }
+    // Surface/MediaProjection frames use monotonic nanoseconds. A delay alone is
+    // insufficient when the compositor is busy: reject frames predating the hide.
+    long earliest =
+        requireFreshFrame ? Math.max(geometryReadyNanos, hideAfterNanos) : geometryReadyNanos;
+    if (latestImage == null || latestImage.getTimestamp() < earliest) {
+      if (attempt < 8) analysis.postDelayed(() -> capture(current, attempt + 1), 40);
+      else {
+        restore();
+        finishFrame(250);
+      }
+      return;
+    }
     Bitmap bitmap = null;
-    try (Image image = reader.acquireLatestImage()) {
+    Image sampled = latestImage;
+    latestImage = null;
+    try (Image image = sampled) {
       if (image == null) {
+        restore();
+        finishFrame(200);
+        return;
+      }
+      sampledFrameAgeMs = (System.nanoTime() - image.getTimestamp()) / 1_000_000L;
+      final int sourceWidth = screenW, sourceHeight = screenH;
+      final int frameWidth = image.getWidth(), frameHeight = image.getHeight();
+      if (frameWidth != captureW || frameHeight != captureH) {
         restore();
         finishFrame(200);
         return;
@@ -327,11 +387,38 @@ public final class CaptureService extends Service {
       Image.Plane plane = image.getPlanes()[0];
       ByteBuffer buffer = plane.getBuffer();
       int paddedW = plane.getRowStride() / plane.getPixelStride();
+      frameDetails =
+          "image="
+              + image.getWidth()
+              + "x"
+              + image.getHeight()
+              + " stride="
+              + paddedW
+              + " bytes="
+              + buffer.remaining()
+              + " crop="
+              + image.getCropRect();
       Bitmap padded = Bitmap.createBitmap(paddedW, captureH, Bitmap.Config.ARGB_8888);
       padded.copyPixelsFromBuffer(buffer);
       Rect crop = region();
       bitmap = Bitmap.createBitmap(padded, crop.left, crop.top, crop.width(), crop.height());
       if (bitmap != padded) padded.recycle();
+      if (!bitmap.isMutable()) {
+        Bitmap mutable = bitmap.copy(Bitmap.Config.ARGB_8888, true);
+        bitmap.recycle();
+        bitmap = mutable;
+      }
+      // Keep controls visible and responsive; erase only their pixels from the OCR copy.
+      Rect panel = controlBounds;
+      RectF masked =
+          new RectF(
+              panel.left * (float) captureW / screenW - crop.left,
+              panel.top * (float) captureH / screenH - crop.top,
+              panel.right * (float) captureW / screenW - crop.left,
+              panel.bottom * (float) captureH / screenH - crop.top);
+      Paint mask = new Paint();
+      mask.setColor(Color.BLACK);
+      new Canvas(bitmap).drawRect(masked, mask);
       restore();
       int[] signature = signature(bitmap);
       String nextDictionary = Prefs.get(this).getString("dictionary", "");
@@ -343,10 +430,9 @@ public final class CaptureService extends Service {
       }
       lastRegion = nextRegion;
       int interval = Prefs.interval(this);
+      boolean unchanged = FrameDifference.similar(signature, lastSignature);
       long maxIdle = interval == 350 ? 1500 : interval == 1500 ? 4000 : 2500;
-      if (!dirty
-          && FrameDifference.similar(signature, lastSignature)
-          && SystemClock.elapsedRealtime() - lastOcrAt < maxIdle) {
+      if (!dirty && unchanged && SystemClock.elapsedRealtime() - lastOcrAt < maxIdle) {
         stableFrames++;
         skips++;
         bitmap.recycle();
@@ -354,6 +440,11 @@ public final class CaptureService extends Service {
         return;
       }
       lastSignature = signature;
+      if (!unchanged || dirty)
+        main.post(
+            () -> {
+              if (!stopped && current == generation) overlay.setLabels(Collections.emptyList());
+            });
       stableFrames = 0;
       lastOcrAt = SystemClock.elapsedRealtime();
       Bitmap input = bitmap;
@@ -367,21 +458,29 @@ public final class CaptureService extends Service {
                         try {
                           if (stopped || current != generation || paused || selecting) return;
                           List<OverlayView.Label> labels = new ArrayList<>();
+                          blocks:
                           for (Text.TextBlock block : r.getTextBlocks())
                             for (Text.Line line : block.getLines()) {
                               String value = line.getText();
                               Rect b = line.getBoundingBox();
-                              if (b == null || !value.matches("(?s).*[ぁ-ヿ一-龯々].*")) continue;
+                              if (b == null
+                                  || !JapaneseText.candidate(
+                                      value, Prefs.get(this).getBoolean("kanaOnly", false)))
+                                continue;
                               RectF box =
                                   new RectF(
-                                      (b.left + crop.left) * (float) screenW / captureW,
-                                      (b.top + crop.top) * (float) screenH / captureH,
-                                      (b.right + crop.left) * (float) screenW / captureW,
-                                      (b.bottom + crop.top) * (float) screenH / captureH);
+                                      (b.left + crop.left) * (float) sourceWidth / frameWidth,
+                                      (b.top + crop.top) * (float) sourceHeight / frameHeight,
+                                      (b.right + crop.left) * (float) sourceWidth / frameWidth,
+                                      (b.bottom + crop.top) * (float) sourceHeight / frameHeight);
+                              RectF occlusion = new RectF(panel);
+                              occlusion.inset(-dp(4), -dp(4));
+                              if (RectF.intersects(box, occlusion)) continue;
                               labels.add(new OverlayView.Label(box, readings.read(value)));
-                              if (labels.size() >= 100) break;
+                              if (labels.size() >= 100) break blocks;
                             }
                           long elapsed = SystemClock.elapsedRealtime() - start;
+                          lastOcrMs = elapsed;
                           scans++;
                           main.post(
                               () -> {
@@ -556,7 +655,11 @@ public final class CaptureService extends Service {
   public void onConfigurationChanged(Configuration config) {
     super.onConfigurationChanged(config);
     if (stopped || display == null) return;
+    generation++;
+    geometryReadyNanos = System.nanoTime() + 900_000_000L;
+    lastSignature = null;
     overlay.setLabels(Collections.emptyList());
+    schedule(950);
     if (Build.VERSION.SDK_INT < 34)
       main.postDelayed(
           () -> {
@@ -574,6 +677,7 @@ public final class CaptureService extends Service {
         || height <= 0
         || (width == screenW && height == screenH)) return;
     generation++;
+    geometryReadyNanos = System.nanoTime() + 900_000_000L;
     main.removeCallbacks(tick);
     overlay.setLabels(Collections.emptyList());
     analysis.post(
@@ -581,16 +685,23 @@ public final class CaptureService extends Service {
           try {
             if (stopped) return;
             ImageReader old = reader;
+            if (latestImage != null) {
+              latestImage.close();
+              latestImage = null;
+            }
             setDimensions(width, height);
             createReader();
-            display.resize(captureW, captureH, dpi);
+            // Publish the new consumer surface BEFORE resize notifies WindowManager.
+            // Otherwise it can compute the mirror transform using the old surface size;
+            // replacing one non-null surface with another does not itself send that event.
             display.setSurface(reader.getSurface());
+            display.resize(captureW, captureH, dpi);
             old.close();
             lastSignature = null;
             main.post(
                 () -> {
                   if (stopped) return;
-                  controlParams.x = dp(8);
+                  controlParams.x = Math.max(dp(8), screenW - controls.getWidth() - dp(8));
                   controlParams.y = dp(80);
                   wm.updateViewLayout(controls, controlParams);
                   restore();
@@ -603,6 +714,7 @@ public final class CaptureService extends Service {
   }
 
   private void fail(Exception e) {
+    if (stopped) return;
     android.util.Log.e("YomiLens", "Capture failure", e);
     main.post(
         () -> {
@@ -625,6 +737,10 @@ public final class CaptureService extends Service {
     if (projection != null) projection.stop();
     analysis.post(
         () -> {
+          if (latestImage != null) {
+            latestImage.close();
+            latestImage = null;
+          }
           if (reader != null) reader.close();
           if (recognizer != null) recognizer.close();
           thread.quitSafely();
@@ -636,5 +752,43 @@ public final class CaptureService extends Service {
   @Override
   public IBinder onBind(Intent intent) {
     return null;
+  }
+
+  @Override
+  protected void dump(FileDescriptor fd, PrintWriter out, String[] args) {
+    out.println(frameDetails);
+    out.println("YomiLens diagnostics (no screen text)");
+    out.println("running=" + running + " paused=" + paused + " selecting=" + selecting);
+    out.println("source=" + screenW + "x" + screenH + " capture=" + captureW + "x" + captureH);
+    out.println(
+        "framesReceived="
+            + framesReceived
+            + " ocrRuns="
+            + scans
+            + " skipped="
+            + skips
+            + " lastOcrMs="
+            + lastOcrMs);
+    out.println(
+        "labels="
+            + (overlay == null ? 0 : overlay.labelCount())
+            + " overlayVisible="
+            + (overlay != null && overlay.getVisibility() == View.VISIBLE));
+    out.println("sampledFrameAgeMs=" + sampledFrameAgeMs);
+    if (overlay != null) overlay.dumpGeometry(out);
+    if (controls != null) {
+      for (int i = 1; i < controls.getChildCount(); i++) {
+        View button = controls.getChildAt(i);
+        int[] origin = new int[2];
+        button.getLocationOnScreen(origin);
+        out.println(
+            "control="
+                + (i - 1)
+                + ","
+                + (origin[0] + button.getWidth() / 2)
+                + ","
+                + (origin[1] + button.getHeight() / 2));
+      }
+    }
   }
 }

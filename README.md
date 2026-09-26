@@ -2,7 +2,9 @@
 
 适用于 Android 8.0+ 的本地日语屏幕读音辅助工具，优先支持 vivo / OriginOS 的侧载使用。
 
-首个已签名开发版 APK：`artifacts/apk/YomiLens-0.1.0-universal.apk`。已通过 Android 15 模拟器的断网 OCR、旋转、点击穿透和停止释放验证；尚无 vivo 真机结果。
+当前开发版：`artifacts/apk/YomiLens-0.2.1-arm64.apk`（约 31 MB，适合多数较新的 vivo 手机），以及 `artifacts/apk/YomiLens-0.2.1-universal.apk`（约 61 MB，含 32/64 位 ARM 与模拟器架构）。若不清楚手机架构可安装通用版。两者为同一开发签名。请用 0.2.1 替代有旋转错位问题的 0.2.0；旧包仅保留作历史快照。
+
+已完成 Android 15 模拟器的断网 OCR、八轮横竖屏往返、区域选择、模式切换、跨应用点击穿透和停止释放验证；尚无 vivo 真机结果。
 
 ## 使用
 
@@ -22,6 +24,9 @@
 - 不接收触摸的透明标注层、可拖动控制条、三种显示模式与字号设置。
 - 变化检测、静止降频、512 条 LRU 读音缓存。
 - 离线试读与专名纠音词典（`原文=假名`）。
+- 可选仅识别含假名的行；标注避让原文及控制条。
+- 持续排空旧帧，按帧时间戳等待标注隐藏后的画面；画面变化时清除旧读音。
+- 旋转时先更新接收 Surface 再调整虚拟显示，立即废弃旧结果；过渡期间短暂等待画面稳定。
 
 ## 准确性边界
 
@@ -38,6 +43,8 @@
 ./gradlew.bat :app:connectedDebugAndroidTest
 ```
 
+本工作区可直接执行 `./scripts/build.ps1`，它使用隔离的工具缓存。ARM64 单架构包使用 `./scripts/build.ps1 -Tasks ':app:assembleDebug','-PtargetAbi=arm64-v8a'`。生成文件名仍为 `app-debug.apk`，分发目录中的版本化文件不会混淆架构。
+
 在 `local.properties` 中设置本机 `sdk.dir`。默认生成 `app/build/outputs/apk/debug/app-debug.apk`，为开发签名版本，可侧载。发布到应用商店前需要由所有者管理正式签名。
 
 ## 实现结构
@@ -48,7 +55,7 @@
 - `OverlayView`：将采集坐标映射回屏幕并显示行级标注。
 - `MainActivity` / `SampleActivity`：设置、授权、离线试读与可重复测试画面。
 
-应用不保存屏幕帧。清单显式移除网络权限；OCR 与词典在本机执行。
+应用不保存屏幕帧。清单显式移除网络权限；OCR 与词典在本机执行。运行诊断可用 `adb shell dumpsys activity service io.github.yomilens/.CaptureService`，只包含尺寸、计数、耗时、帧龄、状态和几何坐标，不包含识别文字。
 
 ## 依赖与依据
 
