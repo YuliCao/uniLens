@@ -1,0 +1,99 @@
+"""UI smoke checks against an explicitly selected emulator (never a physical phone).
+
+Usage: python scripts/emulator_smoke.py --adb path/to/adb.exe --serial emulator-5554
+The test resets this development app's emulator data and grants its test permissions.
+"""
+import argparse
+import json
+from pathlib import Path
+import re
+import subprocess
+import time
+import xml.etree.ElementTree as ET
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--adb", required=True)
+parser.add_argument("--serial", default="emulator-5554")
+parser.add_argument("--keep-running", action="store_true")
+args = parser.parse_args()
+if not args.serial.startswith("emulator-"):
+    raise SystemExit("This smoke test is restricted to emulator serials.")
+root = Path(__file__).resolve().parents[1]
+output = root / "artifacts" / "validation"
+output.mkdir(parents=True, exist_ok=True)
+events = []
+
+
+def adb(*parts):
+    return subprocess.check_output(
+        [args.adb, "-s", args.serial, *parts], stderr=subprocess.STDOUT,
+        timeout=40,
+    ).decode("utf-8", errors="replace")
+
+
+def nodes():
+    adb("shell", "uiautomator", "dump", "/sdcard/yomilens-test.xml")
+    xml = adb("shell", "cat", "/sdcard/yomilens-test.xml")
+    return list(ET.fromstring(xml).iter("node"))
+
+
+def find(label, tap=False):
+    deadline = time.monotonic() + 25
+    while time.monotonic() < deadline:
+        for node in nodes():
+            if node.attrib.get("text") == label:
+                if tap:
+                    x1, y1, x2, y2 = map(int, re.findall(r"\d+", node.attrib["bounds"]))
+                    adb("shell", "input", "tap", str((x1+x2)//2), str((y1+y2)//2))
+                events.append({"label": label, "action": "tap" if tap else "found"})
+                return
+        time.sleep(.5)
+    raise AssertionError(f"UI label not found: {label}")
+
+
+def screenshot(name):
+    adb("shell", "screencap", "-p", f"/sdcard/{name}.png")
+    adb("pull", f"/sdcard/{name}.png", str(output / f"{name}.png"))
+
+
+adb("shell", "am", "force-stop", "io.github.yomilens")
+adb("shell", "pm", "clear", "io.github.yomilens")
+adb("shell", "appops", "set", "io.github.yomilens", "SYSTEM_ALERT_WINDOW", "allow")
+adb("shell", "pm", "grant", "io.github.yomilens", "android.permission.POST_NOTIFICATIONS")
+adb("shell", "settings", "put", "system", "accelerometer_rotation", "0")
+adb("shell", "settings", "put", "system", "user_rotation", "0")
+adb("shell", "am", "start", "-W", "-n", "io.github.yomilens/.MainActivity")
+find("② 开始屏幕辅助", tap=True)
+find("Start", tap=True)
+find("打开识别测试页")
+time.sleep(1)
+find("打开识别测试页", tap=True)
+find("日本語を勉強します。")
+time.sleep(7)
+screenshot("portrait")
+adb("shell", "settings", "put", "system", "user_rotation", "1")
+time.sleep(5)
+screenshot("landscape")
+adb("shell", "settings", "put", "system", "user_rotation", "0")
+time.sleep(5)
+screenshot("portrait-after-rotation")
+find("下一页 · 验证点击穿透", tap=True)
+find("冒険を始めましょう。")
+time.sleep(3)
+screenshot("page-two")
+services = adb("shell", "dumpsys", "activity", "services", "io.github.yomilens")
+assert "isForeground=true" in services, services
+events.append({"foregroundService": True, "touchPassThrough": True})
+if not args.keep_running:
+    find("返回设置", tap=True)
+    find("停止辅助", tap=True)
+    time.sleep(1)
+    projection = adb("shell", "dumpsys", "media_projection")
+    assert "io.github.yomilens" not in projection, projection
+    events.append({"projectionReleased": True})
+crashes = adb("logcat", "-b", "crash", "-d")
+(output / "crashes.txt").write_text(crashes, encoding="utf-8")
+assert "Process: io.github.yomilens" not in crashes, crashes
+(output / "smoke.json").write_text(json.dumps(events, ensure_ascii=False, indent=2), encoding="utf-8")
+print("PASS: foreground session, page changes through overlay, rotation, and lifecycle checks.")
+print("Screenshots require visual review for text alignment.")

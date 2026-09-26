@@ -1,0 +1,45 @@
+[
+  {
+    "label": "② 开始屏幕辅助",
+    "action": "tap"
+  },
+  {
+    "label": "Start",
+    "action": "tap"
+  },
+  {
+    "label": "打开识别测试页",
+    "action": "found"
+  },
+  {
+    "label": "打开识别测试页",
+    "action": "tap"
+  },
+  {
+    "label": "日本語を勉強します。",
+    "action": "found"
+  },
+  {
+    "label": "下一页 · 验证点击穿透",
+    "action": "tap"
+  },
+  {
+    "label": "冒険を始めましょう。",
+    "action": "found"
+  },
+  {
+    "foregroundService": true,
+    "touchPassThrough": true
+  },
+  {
+    "label": "返回设置",
+    "action": "tap"
+  },
+  {
+    "label": "停止辅助",
+    "action": "tap"
+  },
+  {
+    "projectionReleased": true
+  }
+]

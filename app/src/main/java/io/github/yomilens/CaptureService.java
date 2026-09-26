@@ -1,0 +1,640 @@
+package io.github.yomilens;
+
+import android.app.*;
+import android.content.*;
+import android.content.pm.ServiceInfo;
+import android.content.res.Configuration;
+import android.graphics.*;
+import android.hardware.display.*;
+import android.media.*;
+import android.media.projection.*;
+import android.os.*;
+import android.util.DisplayMetrics;
+import android.view.*;
+import android.widget.*;
+import com.google.mlkit.vision.common.InputImage;
+import com.google.mlkit.vision.text.*;
+import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions;
+import java.nio.ByteBuffer;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+public final class CaptureService extends Service {
+  public static volatile boolean running = false;
+  public static volatile String status = "尚未启动 · 模型内置 / 离线运行";
+  private final Handler main = new Handler(Looper.getMainLooper());
+  private HandlerThread thread;
+  private Handler analysis;
+  private MediaProjection projection;
+  private VirtualDisplay display;
+  private ImageReader reader;
+  private TextRecognizer recognizer;
+  private ReadingEngine readings;
+  private WindowManager wm;
+  private OverlayView overlay;
+  private LinearLayout controls;
+  private TextView info;
+  private Button pauseButton;
+  private WindowManager.LayoutParams overlayParams, controlParams;
+  private volatile boolean stopped = false, paused = false, selecting = false;
+  private int screenW, screenH, captureW, captureH, dpi;
+  private volatile int[] lastSignature;
+  private int stableFrames = 0;
+  private volatile int generation = 0;
+  private long lastOcrAt = 0;
+  private final AtomicBoolean inFlight = new AtomicBoolean();
+  private String dictionary = "\u0000";
+  private int lastRegion = -1;
+  private long scans = 0, skips = 0;
+  private View selector;
+  private final Runnable tick = this::beginSample;
+
+  @Override
+  public void onCreate() {
+    super.onCreate();
+    thread = new HandlerThread("YomiLens-analysis", android.os.Process.THREAD_PRIORITY_BACKGROUND);
+    thread.start();
+    analysis = new Handler(thread.getLooper());
+    wm = (WindowManager) getSystemService(WINDOW_SERVICE);
+  }
+
+  @Override
+  public int onStartCommand(Intent intent, int flags, int startId) {
+    if (intent != null && "stop".equals(intent.getAction())) {
+      stopSelf();
+      return START_NOT_STICKY;
+    }
+    if (running) return START_NOT_STICKY;
+    if (intent == null || !intent.hasExtra("data")) {
+      stopSelf();
+      return START_NOT_STICKY;
+    }
+    try {
+      NotificationManager nm = getSystemService(NotificationManager.class);
+      nm.createNotificationChannel(
+          new NotificationChannel("capture", "屏幕日语辅助", NotificationManager.IMPORTANCE_LOW));
+      PendingIntent open =
+          PendingIntent.getActivity(
+              this,
+              0,
+              new Intent(this, MainActivity.class),
+              PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+      PendingIntent stop =
+          PendingIntent.getService(
+              this,
+              1,
+              new Intent(this, CaptureService.class).setAction("stop"),
+              PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+      Notification n =
+          new Notification.Builder(this, "capture")
+              .setSmallIcon(io.github.yomilens.R.drawable.ic_lens)
+              .setContentTitle("YomiLens 正在辅助阅读")
+              .setContentText("屏幕只在本机处理 · 点停止结束采集")
+              .setContentIntent(open)
+              .setOngoing(true)
+              .addAction(new Notification.Action.Builder(null, "停止", stop).build())
+              .build();
+      if (Build.VERSION.SDK_INT >= 29)
+        startForeground(7, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+      else startForeground(7, n);
+      Intent data = intent.getParcelableExtra("data");
+      projection =
+          ((MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE))
+              .getMediaProjection(intent.getIntExtra("result", Activity.RESULT_CANCELED), data);
+      if (projection == null) throw new IllegalStateException("屏幕授权已失效，请重新开始");
+      projection.registerCallback(
+          new MediaProjection.Callback() {
+            @Override
+            public void onStop() {
+              if (!stopped) {
+                status = "系统已结束屏幕共享";
+                stopSelf();
+              }
+            }
+
+            @Override
+            public void onCapturedContentResize(int width, int height) {
+              resizeCapture(width, height);
+            }
+          },
+          main);
+      dimensions();
+      createReader();
+      display =
+          projection.createVirtualDisplay(
+              "YomiLens",
+              captureW,
+              captureH,
+              dpi,
+              DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+              reader.getSurface(),
+              null,
+              analysis);
+      createOverlay();
+      running = true;
+      status = "正在加载离线 OCR 与读音词典…";
+      analysis.post(
+          () -> {
+            try {
+              recognizer =
+                  TextRecognition.getClient(new JapaneseTextRecognizerOptions.Builder().build());
+              readings = new ReadingEngine();
+              main.post(
+                  () -> {
+                    if (!stopped) {
+                      status = "运行中 · 等待日语画面";
+                      main.post(tick);
+                    }
+                  });
+            } catch (Exception e) {
+              fail(e);
+            }
+          });
+    } catch (Exception e) {
+      fail(e);
+    }
+    return START_NOT_STICKY;
+  }
+
+  private void dimensions() {
+    DisplayMetrics m = new DisplayMetrics();
+    wm.getDefaultDisplay().getRealMetrics(m);
+    dpi = m.densityDpi;
+    setDimensions(m.widthPixels, m.heightPixels);
+  }
+
+  private void setDimensions(int width, int height) {
+    screenW = width;
+    screenH = height;
+    float scale = Math.min(1f, 1600f / Math.max(screenW, screenH));
+    captureW = Math.max(1, Math.round(screenW * scale));
+    captureH = Math.max(1, Math.round(screenH * scale));
+  }
+
+  private void createReader() {
+    reader = ImageReader.newInstance(captureW, captureH, PixelFormat.RGBA_8888, 3);
+  }
+
+  private int dp(int n) {
+    return Math.round(n * getResources().getDisplayMetrics().density);
+  }
+
+  private WindowManager.LayoutParams params(int w, int h, int flags) {
+    WindowManager.LayoutParams p =
+        new WindowManager.LayoutParams(
+            w,
+            h,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            flags,
+            PixelFormat.TRANSLUCENT);
+    p.gravity = Gravity.TOP | Gravity.LEFT;
+    if (Build.VERSION.SDK_INT >= 28)
+      p.layoutInDisplayCutoutMode =
+          WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+    return p;
+  }
+
+  private void createOverlay() {
+    overlay = new OverlayView(this);
+    overlayParams =
+        params(
+            -1,
+            -1,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
+    // Android 12+ allows pass-through only below maximum obscuring opacity.
+    overlayParams.alpha = .75f;
+    wm.addView(overlay, overlayParams);
+    controls = new LinearLayout(this);
+    controls.setOrientation(LinearLayout.HORIZONTAL);
+    controls.setGravity(Gravity.CENTER_VERTICAL);
+    controls.setPadding(dp(4), 0, dp(4), 0);
+    controls.setBackgroundColor(0xee173b42);
+    info = new TextView(this);
+    info.setText("読 · 拖动");
+    info.setTextColor(Color.WHITE);
+    info.setTextSize(11);
+    info.setPadding(dp(8), dp(10), dp(8), dp(10));
+    controls.addView(info);
+    pauseButton =
+        control(
+            "暂停",
+            () -> {
+              paused = !paused;
+              generation++;
+              pauseButton.setText(paused ? "继续" : "暂停");
+              overlay.setLabels(Collections.emptyList());
+              status = paused ? "已暂停（屏幕共享仍开启）" : "运行中";
+              if (!paused) {
+                lastSignature = null;
+                main.removeCallbacks(tick);
+                main.post(tick);
+              }
+            });
+    control(
+        "模式",
+        () -> {
+          Prefs.get(this).edit().putInt("mode", (Prefs.mode(this) + 1) % 3).apply();
+          overlay.invalidate();
+        });
+    control("框选", this::selectRegion);
+    control("×", this::stopSelf);
+    controlParams =
+        params(
+            -2,
+            dp(44),
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL);
+    controlParams.x = dp(8);
+    controlParams.y = dp(80);
+    wm.addView(controls, controlParams);
+    info.setOnTouchListener(
+        new View.OnTouchListener() {
+          float x, y;
+          int startX, startY;
+
+          public boolean onTouch(View v, android.view.MotionEvent e) {
+            if (e.getAction() == 0) {
+              x = e.getRawX();
+              y = e.getRawY();
+              startX = controlParams.x;
+              startY = controlParams.y;
+              return true;
+            }
+            if (e.getAction() == 2) {
+              controlParams.x =
+                  Math.max(
+                      0, Math.min(screenW - controls.getWidth(), startX + (int) (e.getRawX() - x)));
+              controlParams.y =
+                  Math.max(
+                      0,
+                      Math.min(screenH - controls.getHeight(), startY + (int) (e.getRawY() - y)));
+              wm.updateViewLayout(controls, controlParams);
+              return true;
+            }
+            return true;
+          }
+        });
+  }
+
+  private Button control(String name, Runnable action) {
+    Button b = new Button(this);
+    b.setText(name);
+    b.setTextSize(11);
+    b.setTextColor(Color.WHITE);
+    b.setBackgroundColor(Color.TRANSPARENT);
+    b.setPadding(dp(4), 0, dp(4), 0);
+    b.setMinWidth(0);
+    b.setMinimumWidth(0);
+    b.setOnClickListener(v -> action.run());
+    controls.addView(b, new LinearLayout.LayoutParams(dp(name.equals("×") ? 32 : 46), -1));
+    return b;
+  }
+
+  private void beginSample() {
+    if (stopped || paused || selecting) return;
+    if (!((PowerManager) getSystemService(POWER_SERVICE)).isInteractive() || MainActivity.visible) {
+      overlay.setLabels(Collections.emptyList());
+      schedule(1000);
+      return;
+    }
+    if (!inFlight.compareAndSet(false, true)) {
+      schedule(100);
+      return;
+    }
+    // Exclude our own readings from OCR. Restore immediately after copying the frame.
+    overlay.setVisibility(View.INVISIBLE);
+    controls.setAlpha(0f);
+    int current = generation;
+    analysis.postDelayed(() -> capture(current), 80);
+  }
+
+  private void capture(int current) {
+    if (stopped || paused || selecting || current != generation) {
+      restore();
+      finishFrame(200);
+      return;
+    }
+    Bitmap bitmap = null;
+    try (Image image = reader.acquireLatestImage()) {
+      if (image == null) {
+        restore();
+        finishFrame(200);
+        return;
+      }
+      Image.Plane plane = image.getPlanes()[0];
+      ByteBuffer buffer = plane.getBuffer();
+      int paddedW = plane.getRowStride() / plane.getPixelStride();
+      Bitmap padded = Bitmap.createBitmap(paddedW, captureH, Bitmap.Config.ARGB_8888);
+      padded.copyPixelsFromBuffer(buffer);
+      Rect crop = region();
+      bitmap = Bitmap.createBitmap(padded, crop.left, crop.top, crop.width(), crop.height());
+      if (bitmap != padded) padded.recycle();
+      restore();
+      int[] signature = signature(bitmap);
+      String nextDictionary = Prefs.get(this).getString("dictionary", "");
+      int nextRegion = Prefs.get(this).getInt("region", 0);
+      boolean dirty = !nextDictionary.equals(dictionary) || lastRegion != nextRegion;
+      if (!nextDictionary.equals(dictionary)) {
+        dictionary = nextDictionary;
+        readings.setOverrides(dictionary);
+      }
+      lastRegion = nextRegion;
+      int interval = Prefs.interval(this);
+      long maxIdle = interval == 350 ? 1500 : interval == 1500 ? 4000 : 2500;
+      if (!dirty
+          && FrameDifference.similar(signature, lastSignature)
+          && SystemClock.elapsedRealtime() - lastOcrAt < maxIdle) {
+        stableFrames++;
+        skips++;
+        bitmap.recycle();
+        finishFrame(Math.min(1500, interval + stableFrames * 100));
+        return;
+      }
+      lastSignature = signature;
+      stableFrames = 0;
+      lastOcrAt = SystemClock.elapsedRealtime();
+      Bitmap input = bitmap;
+      long start = SystemClock.elapsedRealtime();
+      recognizer
+          .process(InputImage.fromBitmap(input, 0))
+          .addOnSuccessListener(
+              r ->
+                  analysis.post(
+                      () -> {
+                        try {
+                          if (stopped || current != generation || paused || selecting) return;
+                          List<OverlayView.Label> labels = new ArrayList<>();
+                          for (Text.TextBlock block : r.getTextBlocks())
+                            for (Text.Line line : block.getLines()) {
+                              String value = line.getText();
+                              Rect b = line.getBoundingBox();
+                              if (b == null || !value.matches("(?s).*[ぁ-ヿ一-龯々].*")) continue;
+                              RectF box =
+                                  new RectF(
+                                      (b.left + crop.left) * (float) screenW / captureW,
+                                      (b.top + crop.top) * (float) screenH / captureH,
+                                      (b.right + crop.left) * (float) screenW / captureW,
+                                      (b.bottom + crop.top) * (float) screenH / captureH);
+                              labels.add(new OverlayView.Label(box, readings.read(value)));
+                              if (labels.size() >= 100) break;
+                            }
+                          long elapsed = SystemClock.elapsedRealtime() - start;
+                          scans++;
+                          main.post(
+                              () -> {
+                                if (stopped || current != generation || paused || selecting) return;
+                                overlay.setLabels(labels);
+                                info.setText("読 " + elapsed + "ms");
+                                status =
+                                    "运行中 · "
+                                        + labels.size()
+                                        + " 行 · OCR+读音 "
+                                        + elapsed
+                                        + " ms · 识别 "
+                                        + scans
+                                        + " / 跳过 "
+                                        + skips;
+                              });
+                        } catch (Exception e) {
+                          fail(e);
+                        } finally {
+                          input.recycle();
+                          finishFrame(Prefs.interval(this));
+                        }
+                      }))
+          .addOnFailureListener(
+              e ->
+                  analysis.post(
+                      () -> {
+                        input.recycle();
+                        lastSignature = null;
+                        main.post(
+                            () -> {
+                              if (overlay != null) overlay.setLabels(Collections.emptyList());
+                              status = "OCR 暂不可用：" + e.getMessage();
+                            });
+                        finishFrame(2000);
+                      }));
+    } catch (Exception e) {
+      if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+      inFlight.set(false);
+      restore();
+      fail(e);
+    }
+  }
+
+  private Rect region() {
+    int mode = Prefs.get(this).getInt("region", 0);
+    if (mode == 1) return new Rect(0, captureH / 2, captureW, captureH);
+    if (mode == 2) return new Rect(0, captureH / 6, captureW, captureH * 5 / 6);
+    if (mode == 3) {
+      android.content.SharedPreferences p = Prefs.get(this);
+      int l = Math.max(0, Math.min(captureW - 1, (int) (p.getFloat("left", 0) * captureW))),
+          t = Math.max(0, Math.min(captureH - 1, (int) (p.getFloat("top", 0) * captureH)));
+      int r = Math.max(l + 1, Math.min(captureW, (int) (p.getFloat("right", 1) * captureW))),
+          b = Math.max(t + 1, Math.min(captureH, (int) (p.getFloat("bottom", 1) * captureH)));
+      return new Rect(l, t, r, b);
+    }
+    return new Rect(0, 0, captureW, captureH);
+  }
+
+  private int[] signature(Bitmap b) {
+    Bitmap small = Bitmap.createScaledBitmap(b, 128, 192, true);
+    int[] values = new int[128 * 192];
+    small.getPixels(values, 0, 128, 0, 0, 128, 192);
+    if (small != b) small.recycle();
+    return values;
+  }
+
+  private void restore() {
+    main.post(
+        () -> {
+          if (!stopped && !selecting && overlay != null) {
+            overlay.setVisibility(View.VISIBLE);
+            controls.setAlpha(1f);
+          }
+        });
+  }
+
+  private void finishFrame(long delay) {
+    inFlight.set(false);
+    schedule(delay);
+  }
+
+  private void schedule(long delay) {
+    main.post(
+        () -> {
+          if (!stopped && !paused && !selecting) {
+            main.removeCallbacks(tick);
+            main.postDelayed(tick, delay);
+          }
+        });
+  }
+
+  private void selectRegion() {
+    if (selecting) return;
+    selecting = true;
+    generation++;
+    main.removeCallbacks(tick);
+    overlay.setLabels(Collections.emptyList());
+    controls.setVisibility(View.GONE);
+    selector =
+        new View(this) {
+          final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+          float sx, sy, ex, ey;
+          boolean down;
+
+          protected void onDraw(Canvas c) {
+            c.drawColor(0x55304750);
+            p.setColor(Color.WHITE);
+            p.setTextSize(dp(17));
+            c.drawText("拖动框选识别区域 · 轻点取消", dp(20), dp(64), p);
+            if (down) {
+              p.setColor(0xaa41dcc0);
+              p.setStyle(Paint.Style.STROKE);
+              p.setStrokeWidth(dp(2));
+              c.drawRect(Math.min(sx, ex), Math.min(sy, ey), Math.max(sx, ex), Math.max(sy, ey), p);
+              p.setStyle(Paint.Style.FILL);
+            }
+          }
+
+          public boolean onTouchEvent(MotionEvent e) {
+            if (e.getAction() == MotionEvent.ACTION_DOWN) {
+              sx = ex = e.getX();
+              sy = ey = e.getY();
+              down = true;
+            } else if (e.getAction() == MotionEvent.ACTION_MOVE) {
+              ex = e.getX();
+              ey = e.getY();
+            } else if (e.getAction() == MotionEvent.ACTION_UP) {
+              ex = e.getX();
+              ey = e.getY();
+              if (Math.abs(ex - sx) > dp(32) && Math.abs(ey - sy) > dp(32)) {
+                int[] origin = new int[2];
+                getLocationOnScreen(origin);
+                Prefs.get(CaptureService.this)
+                    .edit()
+                    .putInt("region", 3)
+                    .putFloat("left", (origin[0] + Math.min(sx, ex)) / screenW)
+                    .putFloat("top", (origin[1] + Math.min(sy, ey)) / screenH)
+                    .putFloat("right", (origin[0] + Math.max(sx, ex)) / screenW)
+                    .putFloat("bottom", (origin[1] + Math.max(sy, ey)) / screenH)
+                    .apply();
+              }
+              finishSelection();
+            } else if (e.getAction() == MotionEvent.ACTION_CANCEL) finishSelection();
+            invalidate();
+            return true;
+          }
+        };
+    WindowManager.LayoutParams p =
+        params(
+            -1,
+            -1,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN);
+    wm.addView(selector, p);
+  }
+
+  private void finishSelection() {
+    if (selector != null) {
+      wm.removeView(selector);
+      selector = null;
+    }
+    selecting = false;
+    lastSignature = null;
+    controls.setVisibility(View.VISIBLE);
+    controls.setAlpha(1);
+    overlay.setVisibility(View.VISIBLE);
+    if (!paused) main.post(tick);
+  }
+
+  @Override
+  public void onConfigurationChanged(Configuration config) {
+    super.onConfigurationChanged(config);
+    if (stopped || display == null) return;
+    overlay.setLabels(Collections.emptyList());
+    if (Build.VERSION.SDK_INT < 34)
+      main.postDelayed(
+          () -> {
+            DisplayMetrics m = new DisplayMetrics();
+            wm.getDefaultDisplay().getRealMetrics(m);
+            resizeCapture(m.widthPixels, m.heightPixels);
+          },
+          250);
+  }
+
+  private void resizeCapture(int width, int height) {
+    if (stopped
+        || display == null
+        || width <= 0
+        || height <= 0
+        || (width == screenW && height == screenH)) return;
+    generation++;
+    main.removeCallbacks(tick);
+    overlay.setLabels(Collections.emptyList());
+    analysis.post(
+        () -> {
+          try {
+            if (stopped) return;
+            ImageReader old = reader;
+            setDimensions(width, height);
+            createReader();
+            display.resize(captureW, captureH, dpi);
+            display.setSurface(reader.getSurface());
+            old.close();
+            lastSignature = null;
+            main.post(
+                () -> {
+                  if (stopped) return;
+                  controlParams.x = dp(8);
+                  controlParams.y = dp(80);
+                  wm.updateViewLayout(controls, controlParams);
+                  restore();
+                  schedule(250);
+                });
+          } catch (Exception e) {
+            fail(e);
+          }
+        });
+  }
+
+  private void fail(Exception e) {
+    android.util.Log.e("YomiLens", "Capture failure", e);
+    main.post(
+        () -> {
+          status = "辅助停止：" + e.getClass().getSimpleName() + " · " + e.getMessage();
+          Toast.makeText(this, status, Toast.LENGTH_LONG).show();
+          stopSelf();
+        });
+  }
+
+  @Override
+  public void onDestroy() {
+    stopped = true;
+    running = false;
+    generation++;
+    main.removeCallbacksAndMessages(null);
+    if (selector != null && selector.isAttachedToWindow()) wm.removeView(selector);
+    if (controls != null && controls.isAttachedToWindow()) wm.removeView(controls);
+    if (overlay != null && overlay.isAttachedToWindow()) wm.removeView(overlay);
+    if (display != null) display.release();
+    if (projection != null) projection.stop();
+    analysis.post(
+        () -> {
+          if (reader != null) reader.close();
+          if (recognizer != null) recognizer.close();
+          thread.quitSafely();
+        });
+    if (!status.startsWith("辅助停止") && !status.startsWith("系统")) status = "已停止 · 屏幕采集已释放";
+    super.onDestroy();
+  }
+
+  @Override
+  public IBinder onBind(Intent intent) {
+    return null;
+  }
+}
