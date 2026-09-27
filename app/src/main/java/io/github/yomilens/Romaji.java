@@ -39,7 +39,22 @@ public final class Romaji {
   }
 
   public static String hiragana(String s) {
-    s = Normalizer.normalize(s, Normalizer.Form.NFKC);
+    StringBuilder normalized = new StringBuilder();
+    for (int i = 0; i < s.length(); ) {
+      int end = i;
+      while (end < s.length() && s.charAt(end) >= '\uff66' && s.charAt(end) <= '\uff9f') end++;
+      if (end > i) {
+        normalized.append(Normalizer.normalize(s.substring(i, end), Normalizer.Form.NFKC));
+        i = end;
+      } else {
+        char c = s.charAt(i++);
+        normalized.append(
+            c >= '\uff10' && c <= '\uff5a' && Character.isLetterOrDigit(c)
+                ? (char) (c - 0xfee0)
+                : c);
+      }
+    }
+    s = normalized.toString();
     StringBuilder out = new StringBuilder();
     for (char c : s.toCharArray()) out.append(c >= 'ァ' && c <= 'ヶ' ? (char) (c - 0x60) : c);
     return out.toString();

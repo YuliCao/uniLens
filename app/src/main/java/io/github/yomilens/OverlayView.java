@@ -36,8 +36,10 @@ final class OverlayView extends View {
   private final List<Rendered> rendered = new ArrayList<>();
   private List<Label> labels = Collections.emptyList();
   private final RectF controlBounds = new RectF();
+  private final RectF region = new RectF();
   private boolean dirty = true;
   private int lastMode = -1, lastFont = -1;
+  private int blankTransitions = 0;
 
   OverlayView(Context c) {
     super(c);
@@ -46,6 +48,7 @@ final class OverlayView extends View {
   }
 
   void setLabels(List<Label> next) {
+    if (!labels.isEmpty() && next.isEmpty()) blankTransitions++;
     labels = next;
     dirty = true;
     invalidate();
@@ -59,6 +62,8 @@ final class OverlayView extends View {
     int[] origin = new int[2];
     getLocationOnScreen(origin);
     out.println("overlayOrigin=" + origin[0] + "," + origin[1]);
+    out.println("regionBorder=" + !region.isEmpty());
+    out.println("blankTransitions=" + blankTransitions);
     for (Label label : labels) {
       RectF b = label.box;
       out.println("box=" + b.left + "," + b.top + "," + b.right + "," + b.bottom);
@@ -76,6 +81,43 @@ final class OverlayView extends View {
     }
   }
 
+  void setRegion(RectF value) {
+    if (value == null) region.setEmpty();
+    else region.set(value);
+    invalidate();
+  }
+
+  List<RectF> captureMasks() {
+    ensureLayout();
+    List<RectF> masks = new ArrayList<>();
+    float d = getResources().getDisplayMetrics().density;
+    for (Rendered item : rendered) {
+      RectF r = new RectF(item.bounds);
+      r.inset(-2, -2);
+      masks.add(r);
+      RectF b = item.label.box;
+      masks.add(new RectF(b.left, b.bottom, b.right, b.bottom + d + 1));
+    }
+    if (!region.isEmpty()) {
+      float t = 2 * d + 1;
+      masks.add(new RectF(region.left - t, region.top - t, region.right + t, region.top + t));
+      masks.add(new RectF(region.left - t, region.bottom - t, region.right + t, region.bottom + t));
+      masks.add(new RectF(region.left - t, region.top, region.left + t, region.bottom));
+      masks.add(new RectF(region.right - t, region.top, region.right + t, region.bottom));
+    }
+    return masks;
+  }
+
+  private void ensureLayout() {
+    int mode = Prefs.mode(getContext()), font = Prefs.get(getContext()).getInt("font", 14);
+    if (dirty || mode != lastMode || font != lastFont) {
+      rebuild(mode, font);
+      lastMode = mode;
+      lastFont = font;
+      dirty = false;
+    }
+  }
+
   @Override
   protected void onSizeChanged(int w, int h, int oldw, int oldh) {
     dirty = true;
@@ -84,27 +126,16 @@ final class OverlayView extends View {
   @Override
   protected void onDraw(Canvas canvas) {
     super.onDraw(canvas);
-    int mode = Prefs.mode(getContext()), font = Prefs.get(getContext()).getInt("font", 14);
-    if (dirty || mode != lastMode || font != lastFont) {
-      rebuild(mode, font);
-      lastMode = mode;
-      lastFont = font;
-      dirty = false;
-    }
+    ensureLayout();
     float density = getResources().getDisplayMetrics().density, pad = 4 * density;
+    if (!region.isEmpty()) {
+      back.setColor(0xff20d8c0);
+      back.setStyle(Paint.Style.STROKE);
+      back.setStrokeWidth(2 * density);
+      canvas.drawRect(region, back);
+      back.setStyle(Paint.Style.FILL);
+    }
     for (Rendered item : rendered) {
-      RectF source = item.label.box;
-      RectF target = item.bounds;
-      back.setColor(0x9970d6c7);
-      back.setStrokeWidth(density);
-      if (target.left >= source.right)
-        canvas.drawLine(source.right, source.centerY(), target.left, target.centerY(), back);
-      else if (target.right <= source.left)
-        canvas.drawLine(source.left, source.centerY(), target.right, target.centerY(), back);
-      else if (target.top >= source.bottom)
-        canvas.drawLine(source.centerX(), source.bottom, target.centerX(), target.top, back);
-      else if (source.top - target.bottom > 8 * density)
-        canvas.drawLine(source.centerX(), source.top, target.centerX(), target.bottom, back);
       back.setColor(0xdd10292f);
       canvas.drawRoundRect(item.bounds, 4 * density, 4 * density, back);
       ink.setTextSize(item.size);

@@ -106,7 +106,15 @@ public final class ReadingEngine {
         kana.append(gap);
         romaji.append(gap);
       }
-      String surface = t.getSurface(), k = overrides.getOrDefault(surface, t.getReading());
+      String surface = t.getSurface();
+      if (surface.codePoints().allMatch(cp -> !Character.isLetterOrDigit(cp))) {
+        flushGroup(romaji, group);
+        kana.append(surface);
+        romaji.append(surface);
+        position = t.getPosition() + surface.length();
+        continue;
+      }
+      String k = overrides.getOrDefault(surface, t.getReading());
       if (k == null || k.equals("*")) {
         k = surface;
         uncertain |= JapaneseText.containsHan(surface);

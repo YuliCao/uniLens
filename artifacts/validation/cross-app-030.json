@@ -1,0 +1,33 @@
+[
+  {
+    "label": "日本語を勉強します。",
+    "action": "found"
+  },
+  {
+    "geometry": "external-app",
+    "matchedJapaneseLines": 4
+  },
+  {
+    "label": "下一页 · 外部应用",
+    "action": "tap"
+  },
+  {
+    "label": "冒険を始めましょう。",
+    "action": "found"
+  },
+  {
+    "geometry": "external-app-next",
+    "matchedJapaneseLines": 4
+  },
+  {
+    "crossPackageCapture": true,
+    "crossPackageTouchPassThrough": true
+  },
+  {
+    "label": "停止辅助",
+    "action": "tap"
+  },
+  {
+    "projectionReleased": true
+  }
+]

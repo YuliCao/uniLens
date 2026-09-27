@@ -1,0 +1,95 @@
+[
+  {
+    "label": "② 开始屏幕辅助",
+    "action": "tap"
+  },
+  {
+    "label": "Start",
+    "action": "tap"
+  },
+  {
+    "label": "打开识别测试页",
+    "action": "found"
+  },
+  {
+    "label": "打开识别测试页",
+    "action": "tap"
+  },
+  {
+    "label": "日本語を勉強します。",
+    "action": "found"
+  },
+  {
+    "geometry": "portrait",
+    "matchedJapaneseLines": 4
+  },
+  {
+    "geometry": "landscape",
+    "matchedJapaneseLines": 4
+  },
+  {
+    "geometry": "portrait-after-rotation",
+    "matchedJapaneseLines": 4
+  },
+  {
+    "controlTapped": 0
+  },
+  {
+    "controlTapped": 0
+  },
+  {
+    "geometry": "resumed",
+    "matchedJapaneseLines": 4
+  },
+  {
+    "controlTapped": 1
+  },
+  {
+    "geometry": "mode-kana",
+    "matchedJapaneseLines": 4
+  },
+  {
+    "controlTapped": 1
+  },
+  {
+    "geometry": "mode-original",
+    "matchedJapaneseLines": 4
+  },
+  {
+    "controlTapped": 1
+  },
+  {
+    "geometry": "mode-romaji",
+    "matchedJapaneseLines": 4
+  },
+  {
+    "controlTapped": 2
+  },
+  {
+    "geometry": "region-bottom",
+    "matchedJapaneseLines": 1
+  },
+  {
+    "controlTapped": 2
+  },
+  {
+    "geometry": "region-full",
+    "matchedJapaneseLines": 4
+  },
+  {
+    "label": "下一页 · 验证点击穿透",
+    "action": "tap"
+  },
+  {
+    "label": "冒険を始めましょう。",
+    "action": "found"
+  },
+  {
+    "geometry": "page-two",
+    "matchedJapaneseLines": 4
+  },
+  {
+    "foregroundService": true,
+    "touchPassThrough": true
+  }
+]

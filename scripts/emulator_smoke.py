@@ -107,6 +107,10 @@ if not args.external_only:
     find("打开识别测试页")
     time.sleep(1)
     find("打开识别测试页", tap=True)
+    time.sleep(2)
+    state = adb("shell", "dumpsys", "activity", "service", "io.github.yomilens/.CaptureService")
+    assert "selecting=true" in state, "Default region selector did not open: " + state
+    adb("shell", "input", "swipe", "10", "80", "1070", "1850", "700")
     find("日本語を勉強します。")
     time.sleep(7)
     screenshot("portrait")

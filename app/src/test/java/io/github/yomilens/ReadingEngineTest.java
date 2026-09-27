@@ -6,6 +6,17 @@ import org.junit.Test;
 
 public class ReadingEngineTest {
   @Test
+  public void preservesOriginalPunctuationAndBracketWidth() {
+    ReadingEngine e = new ReadingEngine();
+    String input = "「日本語」（東京）【学校】『友達』、。！？…";
+    ReadingEngine.Reading r = e.read(input);
+    String symbols = "「」（）【】『』、。！？…";
+    assertEquals(symbols, r.romaji.replaceAll("[^「」（）【】『』、。！？…]", ""));
+    assertEquals(symbols, r.kana.replaceAll("[^「」（）【】『』、。！？…]", ""));
+    assertEquals("（koohii）！", Romaji.convert("（ｺｰﾋｰ）！"));
+  }
+
+  @Test
   public void geminationAcrossConjugationBoundary() {
     ReadingEngine engine = new ReadingEngine();
     String joined = engine.read("新しい仲間が加わった！").romaji;

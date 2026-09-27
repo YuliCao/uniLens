@@ -51,8 +51,8 @@ public final class CaptureService extends Service {
   private int lastRegion = -1;
   private long scans = 0, skips = 0;
   private volatile long framesReceived = 0, lastOcrMs = 0;
-  private long hideAfterNanos = 0;
-  private boolean requireFreshFrame = false;
+  private volatile List<RectF> annotationMasks = Collections.emptyList();
+  private boolean needsSelection = true;
   private volatile long sampledFrameAgeMs = 0;
   // Discard animation/letterboxed frames while the display and capture surface settle.
   private volatile long geometryReadyNanos;
@@ -332,7 +332,14 @@ public final class CaptureService extends Service {
       schedule(100);
       return;
     }
-    // Exclude our own readings from OCR. Restore immediately after copying the frame.
+    if (needsSelection && Prefs.get(this).getInt("region", 3) == 3) {
+      inFlight.set(false);
+      needsSelection = false;
+      selectRegion();
+      return;
+    }
+    updateRegionBorder();
+    // Keep the display stable; exclude only our drawing in the OCR copy.
     int[] controlOrigin = new int[2];
     controls.getLocationOnScreen(controlOrigin);
     controlBounds =
@@ -342,9 +349,7 @@ public final class CaptureService extends Service {
             controlOrigin[0] + controls.getWidth(),
             controlOrigin[1] + controls.getHeight());
     overlay.setControlBounds(controlBounds);
-    requireFreshFrame = overlay.labelCount() > 0;
-    overlay.setVisibility(View.INVISIBLE);
-    hideAfterNanos = System.nanoTime();
+    annotationMasks = overlay.captureMasks();
     int current = generation;
     analysis.postDelayed(() -> capture(current, 0), 80);
   }
@@ -355,10 +360,8 @@ public final class CaptureService extends Service {
       finishFrame(200);
       return;
     }
-    // Surface/MediaProjection frames use monotonic nanoseconds. A delay alone is
-    // insufficient when the compositor is busy: reject frames predating the hide.
-    long earliest =
-        requireFreshFrame ? Math.max(geometryReadyNanos, hideAfterNanos) : geometryReadyNanos;
+    // Reject frames produced during the display rotation transition.
+    long earliest = geometryReadyNanos;
     if (latestImage == null || latestImage.getTimestamp() < earliest) {
       if (attempt < 8) analysis.postDelayed(() -> capture(current, attempt + 1), 40);
       else {
@@ -418,11 +421,23 @@ public final class CaptureService extends Service {
               panel.bottom * (float) captureH / screenH - crop.top);
       Paint mask = new Paint();
       mask.setColor(Color.BLACK);
-      new Canvas(bitmap).drawRect(masked, mask);
+      Canvas clean = new Canvas(bitmap);
+      maskDrawing(bitmap, clean, masked, mask);
+      for (RectF r : annotationMasks) {
+        maskDrawing(
+            bitmap,
+            clean,
+            new RectF(
+                r.left * captureW / screenW - crop.left,
+                r.top * captureH / screenH - crop.top,
+                r.right * captureW / screenW - crop.left,
+                r.bottom * captureH / screenH - crop.top),
+            mask);
+      }
       restore();
       int[] signature = signature(bitmap);
       String nextDictionary = Prefs.get(this).getString("dictionary", "");
-      int nextRegion = Prefs.get(this).getInt("region", 0);
+      int nextRegion = Prefs.get(this).getInt("region", 3);
       boolean dirty = !nextDictionary.equals(dictionary) || lastRegion != nextRegion;
       if (!nextDictionary.equals(dictionary)) {
         dictionary = nextDictionary;
@@ -440,11 +455,6 @@ public final class CaptureService extends Service {
         return;
       }
       lastSignature = signature;
-      if (!unchanged || dirty)
-        main.post(
-            () -> {
-              if (!stopped && current == generation) overlay.setLabels(Collections.emptyList());
-            });
       stableFrames = 0;
       lastOcrAt = SystemClock.elapsedRealtime();
       Bitmap input = bitmap;
@@ -512,7 +522,7 @@ public final class CaptureService extends Service {
                         lastSignature = null;
                         main.post(
                             () -> {
-                              if (overlay != null) overlay.setLabels(Collections.emptyList());
+                              if (stopped || current != generation) return;
                               status = "OCR 暂不可用：" + e.getMessage();
                             });
                         finishFrame(2000);
@@ -525,8 +535,48 @@ public final class CaptureService extends Service {
     }
   }
 
+  private static void maskDrawing(Bitmap bitmap, Canvas canvas, RectF rect, Paint paint) {
+    RectF clipped = new RectF(rect);
+    if (!clipped.intersect(0, 0, bitmap.getWidth(), bitmap.getHeight())) return;
+    // Match the surrounding background instead of introducing a black glyph-like bar.
+    int[] red = new int[16], green = new int[16], blue = new int[16];
+    for (int i = 0; i < 16; i++) {
+      float f = ((i % 4) + .5f) / 4;
+      float x =
+          i < 8
+              ? clipped.left + f * clipped.width()
+              : i < 12 ? clipped.left - 3 : clipped.right + 3;
+      float y =
+          i < 4 ? clipped.top - 3 : i < 8 ? clipped.bottom + 3 : clipped.top + f * clipped.height();
+      int color =
+          bitmap.getPixel(
+              Math.max(0, Math.min(bitmap.getWidth() - 1, (int) x)),
+              Math.max(0, Math.min(bitmap.getHeight() - 1, (int) y)));
+      red[i] = Color.red(color);
+      green[i] = Color.green(color);
+      blue[i] = Color.blue(color);
+    }
+    Arrays.sort(red);
+    Arrays.sort(green);
+    Arrays.sort(blue);
+    paint.setColor(Color.rgb(red[8], green[8], blue[8]));
+    canvas.drawRect(clipped, paint);
+  }
+
+  private void updateRegionBorder() {
+    Rect r = region();
+    overlay.setRegion(
+        Prefs.get(this).getInt("region", 3) == 3 && Prefs.get(this).contains("left")
+            ? new RectF(
+                r.left * (float) screenW / captureW,
+                r.top * (float) screenH / captureH,
+                r.right * (float) screenW / captureW,
+                r.bottom * (float) screenH / captureH)
+            : null);
+  }
+
   private Rect region() {
-    int mode = Prefs.get(this).getInt("region", 0);
+    int mode = Prefs.get(this).getInt("region", 3);
     if (mode == 1) return new Rect(0, captureH / 2, captureW, captureH);
     if (mode == 2) return new Rect(0, captureH / 6, captureW, captureH * 5 / 6);
     if (mode == 3) {
@@ -644,6 +694,14 @@ public final class CaptureService extends Service {
       selector = null;
     }
     selecting = false;
+    needsSelection = false;
+    if (!Prefs.get(this).contains("left") && Prefs.get(this).getInt("region", 3) == 3) {
+      paused = true;
+      needsSelection = true;
+      pauseButton.setText("继续");
+      status = "尚未框选 · 点继续或框选选择区域";
+    }
+    updateRegionBorder();
     lastSignature = null;
     controls.setVisibility(View.VISIBLE);
     controls.setAlpha(1);
@@ -704,6 +762,7 @@ public final class CaptureService extends Service {
                   controlParams.x = Math.max(dp(8), screenW - controls.getWidth() - dp(8));
                   controlParams.y = dp(80);
                   wm.updateViewLayout(controls, controlParams);
+                  updateRegionBorder();
                   restore();
                   schedule(250);
                 });

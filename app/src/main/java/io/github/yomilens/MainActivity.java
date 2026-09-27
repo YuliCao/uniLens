@@ -30,6 +30,9 @@ public final class MainActivity extends Activity {
   @Override
   public void onCreate(Bundle saved) {
     super.onCreate(saved);
+    if (!Prefs.get(this).getBoolean("regionDefaultV3", false)) {
+      Prefs.get(this).edit().putInt("region", 3).putBoolean("regionDefaultV3", true).apply();
+    }
     build();
   }
 
@@ -106,7 +109,7 @@ public final class MainActivity extends Activity {
     button("打开识别测试页", () -> startActivity(new Intent(this, SampleActivity.class)));
     title("显示与响应");
     addChoice("标注模式", new String[] {"罗马音", "振假名（平假名）", "原文 + 罗马音"}, "mode", 0);
-    addChoice("扫描区域", new String[] {"全屏", "下半屏（游戏对话）", "中部（漫画 / 网页）", "自定义：启动后点「框选」"}, "region", 0);
+    addChoice("扫描区域", new String[] {"全屏", "下半屏（游戏对话）", "中部（漫画 / 网页）", "框选区域（默认）"}, "region", 3);
     CheckBox kanaOnly = new CheckBox(this);
     kanaOnly.setText("只标注含假名的行（略过纯汉字菜单）");
     kanaOnly.setChecked(Prefs.get(this).getBoolean("kanaOnly", false));
