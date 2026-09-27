@@ -233,7 +233,8 @@ public final class CaptureService extends Service {
     controls.setOrientation(LinearLayout.HORIZONTAL);
     controls.setGravity(Gravity.CENTER_VERTICAL);
     controls.setPadding(dp(4), 0, dp(4), 0);
-    controls.setBackgroundColor(0xee173b42);
+    controls.setBackground(Ui.rounded(this, 0xf223403a, 18, 0));
+    controls.setElevation(dp(4));
     info = new TextView(this);
     info.setText("読 · 拖动");
     info.setTextColor(Color.WHITE);
@@ -307,7 +308,7 @@ public final class CaptureService extends Service {
     b.setText(name);
     b.setTextSize(11);
     b.setTextColor(Color.WHITE);
-    b.setBackgroundColor(Color.TRANSPARENT);
+    b.setBackground(Ui.button(this, Color.TRANSPARENT, 12, 0));
     b.setPadding(dp(4), 0, dp(4), 0);
     b.setMinWidth(0);
     b.setMinimumWidth(0);

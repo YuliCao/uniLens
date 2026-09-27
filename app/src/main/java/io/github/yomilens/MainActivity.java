@@ -14,7 +14,7 @@ import java.util.concurrent.*;
 
 public final class MainActivity extends Activity {
   static volatile boolean visible = false;
-  private LinearLayout content;
+  private LinearLayout content, page, actions;
   private TextView state, preview;
   private final ExecutorService worker = Executors.newSingleThreadExecutor();
   private ReadingEngine demoEngine;
@@ -50,55 +50,130 @@ public final class MainActivity extends Activity {
   }
 
   private void title(String s) {
-    TextView t = text(s, 19, 0xff16383c);
-    t.setTypeface(null, Typeface.BOLD);
-    content.addView(t);
+    LinearLayout card = new LinearLayout(this);
+    card.setOrientation(LinearLayout.VERTICAL);
+    card.setPadding(dp(16), dp(14), dp(16), dp(16));
+    card.setBackground(Ui.rounded(this, 0xffffffff, 20, Ui.LINE));
+    LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(-1, -2);
+    layout.topMargin = dp(16);
+    page.addView(card, layout);
+    LinearLayout header = new LinearLayout(this);
+    header.setGravity(Gravity.CENTER_VERTICAL);
+    TextView heading = text(s, 16, Ui.INK);
+    heading.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+    header.addView(heading, new LinearLayout.LayoutParams(0, dp(48), 1));
+    TextView arrow = text("＋", 20, Ui.MUTED);
+    arrow.setGravity(Gravity.CENTER);
+    arrow.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+    boolean collapsible = !s.equals("显示与响应") && !s.equals("屏幕辅助");
+    if (collapsible) header.addView(arrow, new LinearLayout.LayoutParams(dp(32), dp(48)));
+    card.addView(header);
+    content = new LinearLayout(this);
+    content.setOrientation(LinearLayout.VERTICAL);
+    card.addView(content);
+    if (collapsible) {
+      LinearLayout body = content;
+      body.setVisibility(View.GONE);
+      header.setBackground(Ui.button(this, 0xffffffff, 12, 0));
+      header.setContentDescription(s + "，展开");
+      header.setOnClickListener(
+          v -> {
+            boolean show = body.getVisibility() != View.VISIBLE;
+            body.setVisibility(show ? View.VISIBLE : View.GONE);
+            arrow.setText(show ? "−" : "＋");
+            header.setContentDescription(s + (show ? "，收起" : "，展开"));
+          });
+    }
   }
 
   private Button button(String s, Runnable r) {
     Button b = new Button(this);
     b.setText(s);
+    b.setTextSize(14);
     b.setAllCaps(false);
+    b.setPadding(dp(12), 0, dp(12), 0);
+    boolean primary = s.equals("开始阅读");
+    b.setTextColor(primary ? 0xffffffff : Ui.ACCENT);
+    b.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+    b.setBackground(Ui.button(this, primary ? Ui.ACCENT : Ui.SOFT, 14, 0));
+    b.setElevation(0);
+    b.setStateListAnimator(null);
     b.setOnClickListener(v -> r.run());
-    content.addView(b, new LinearLayout.LayoutParams(-1, dp(54)));
+    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(primary ? 54 : 48));
+    lp.topMargin = dp(8);
+    if (s.equals("停止辅助") || s.equals("识别测试")) {
+      if (actions == null) {
+        actions = new LinearLayout(this);
+        content.addView(actions);
+      }
+      lp.width = 0;
+      lp.weight = 1;
+      if (actions.getChildCount() > 0) lp.leftMargin = dp(8);
+      actions.addView(b, lp);
+    } else content.addView(b, lp);
     return b;
+  }
+
+  private void field(EditText input) {
+    input.setTextSize(15);
+    input.setTextColor(Ui.INK);
+    input.setHintTextColor(Ui.MUTED);
+    input.setPadding(dp(12), dp(12), dp(12), dp(12));
+    input.setBackground(Ui.rounded(this, Ui.SOFT, 12, 0));
+  }
+
+  private ArrayAdapter<String> choices(String[] options) {
+    return new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, options) {
+      @Override
+      public View getView(int position, View convert, ViewGroup parent) {
+        TextView view = (TextView) super.getView(position, convert, parent);
+        view.setTextSize(14);
+        view.setTextColor(Ui.INK);
+        view.setGravity(Gravity.CENTER_VERTICAL);
+        view.setPadding(dp(10), 0, dp(24), 0);
+        view.setMinHeight(dp(48));
+        return view;
+      }
+    };
   }
 
   private void build() {
     ScrollView scroll = new ScrollView(this);
     scroll.setFillViewport(true);
-    scroll.setBackgroundColor(0xfff3f6f7);
+    scroll.setBackgroundColor(Ui.BACKGROUND);
+    scroll.setVerticalScrollBarEnabled(false);
     content = new LinearLayout(this);
     content.setOrientation(LinearLayout.VERTICAL);
     content.setPadding(dp(24), dp(24), dp(24), dp(32));
-    scroll.addView(content);
+    page = content;
+    scroll.addView(page);
     setContentView(scroll);
-    content.setOnApplyWindowInsetsListener(
+    content.setPadding(dp(24), dp(16), dp(24), dp(24));
+    scroll.setClipToPadding(true);
+    scroll.setOnApplyWindowInsetsListener(
         (v, insets) -> {
-          v.setPadding(
-              dp(24),
-              dp(16) + insets.getSystemWindowInsetTop(),
-              dp(24),
-              dp(24) + insets.getSystemWindowInsetBottom());
+          v.setPadding(0, insets.getSystemWindowInsetTop(), 0, insets.getSystemWindowInsetBottom());
           return insets;
         });
-    TextView badge = text("YOMILENS  /  日语透镜", 13, 0xff167d8d);
-    badge.setLetterSpacing(.14f);
+    TextView badge = text("YOMILENS  /  日语透镜", 12, Ui.ACCENT);
+    badge.setLetterSpacing(.1f);
     content.addView(badge);
-    TextView hero = text("让日语，读得出来。", 30, 0xff153b40);
+    TextView hero = text("让日语，读得出来。", 26, Ui.INK);
     hero.setTypeface(null, Typeface.BOLD);
     content.addView(hero);
-    content.addView(text("游戏 · 漫画 · 网页\n离线识别屏幕日语，在原文附近显示读音。", 15, 0xff566a70));
-    state = text(CaptureService.status, 14, 0xff167d8d);
+    content.addView(text("圈选日语，即刻读音。全程离线处理。", 14, Ui.MUTED));
+    title("屏幕辅助");
+    state = text(CaptureService.status, 12, Ui.MUTED);
+    state.setMinHeight(dp(36));
     content.addView(state);
     button(
-        "① 允许悬浮显示",
+        "悬浮显示权限",
         () ->
             startActivity(
                 new Intent(
                     Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     Uri.parse("package:" + getPackageName()))));
-    button("② 开始屏幕辅助", this::startCapture);
+    button("开始阅读", this::startCapture);
     button(
         "停止辅助",
         () -> {
@@ -106,24 +181,23 @@ public final class MainActivity extends Activity {
           CaptureService.status = "已停止";
           state.setText(CaptureService.status);
         });
-    button("打开识别测试页", () -> startActivity(new Intent(this, SampleActivity.class)));
+    button("识别测试", () -> startActivity(new Intent(this, SampleActivity.class)));
     title("显示与响应");
     addChoice("标注模式", new String[] {"罗马音", "振假名（平假名）", "原文 + 罗马音"}, "mode", 0);
     addChoice("扫描区域", new String[] {"全屏", "下半屏（游戏对话）", "中部（漫画 / 网页）", "框选区域（默认）"}, "region", 3);
     CheckBox kanaOnly = new CheckBox(this);
     kanaOnly.setText("只标注含假名的行（略过纯汉字菜单）");
+    kanaOnly.setTextSize(13);
+    kanaOnly.setTextColor(Ui.MUTED);
+    kanaOnly.setMinHeight(dp(48));
     kanaOnly.setChecked(Prefs.get(this).getBoolean("kanaOnly", false));
     kanaOnly.setOnCheckedChangeListener(
         (button, checked) -> Prefs.get(this).edit().putBoolean("kanaOnly", checked).apply());
     content.addView(kanaOnly);
-    TextView speedLabel = text("识别频率：静止画面自动降频", 14, 0xff566a70);
+    TextView speedLabel = text("识别频率：静止画面自动降频", 14, Ui.MUTED);
     content.addView(speedLabel);
     Spinner speed = new Spinner(this);
-    speed.setAdapter(
-        new ArrayAdapter<>(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            new String[] {"快速 · 约 0.35 秒间隔", "均衡 · 约 0.75 秒间隔", "省电 · 约 1.5 秒间隔"}));
+    speed.setAdapter(choices(new String[] {"快速 · 0.35 秒间隔", "均衡 · 0.75 秒间隔", "省电 · 1.5 秒间隔"}));
     int val = Prefs.interval(this);
     speed.setSelection(val == 350 ? 0 : val == 1500 ? 2 : 1);
     speed.setOnItemSelectedListener(
@@ -136,7 +210,7 @@ public final class MainActivity extends Activity {
           }
         });
     content.addView(speed);
-    content.addView(text("标注字号", 14, 0xff566a70));
+    content.addView(text("标注字号", 14, Ui.MUTED));
     SeekBar size = new SeekBar(this);
     size.setMax(18);
     size.setProgress(Prefs.get(this).getInt("font", 14) - 10);
@@ -155,8 +229,9 @@ public final class MainActivity extends Activity {
     EditText sample = new EditText(this);
     sample.setText("今日は日本語を勉強します。東京へ行きます。");
     sample.setMinLines(2);
+    field(sample);
     content.addView(sample);
-    preview = text("在这里检查离线读音。", 16, 0xff153b40);
+    preview = text("在这里检查离线读音。", 16, Ui.INK);
     preview.setTextIsSelectable(true);
     button(
         "生成读音",
@@ -184,12 +259,13 @@ public final class MainActivity extends Activity {
         });
     content.addView(preview);
     title("专名纠音");
-    content.addView(text("每行一项：原文=假名。句中按最长专名优先匹配，最多 500 项。", 13, 0xff566a70));
+    content.addView(text("每行一项：原文=假名。句中按最长专名优先匹配，最多 500 项。", 13, Ui.MUTED));
     EditText dict = new EditText(this);
     dict.setHint("八重神子=やえみこ\n原神=げんしん");
     dict.setMinLines(3);
     dict.setGravity(Gravity.TOP);
     dict.setText(Prefs.get(this).getString("dictionary", ""));
+    field(dict);
     content.addView(dict);
     button(
         "保存纠音词典",
@@ -204,7 +280,7 @@ public final class MainActivity extends Activity {
                 + "开始时请选择「整个屏幕」。系统每次开始都需要确认屏幕共享。标注层不接收触摸；小控制条可拖动、暂停和框选。\n\n"
                 + "本版按文字行标注，竖排、花体、极小文字及专有名词可能误识别。受保护视频、银行或禁止截屏的页面无法识别。",
             14,
-            0xff566a70));
+            Ui.MUTED));
     button(
         "打开应用系统设置",
         () ->
@@ -213,13 +289,13 @@ public final class MainActivity extends Activity {
                     Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                     Uri.parse("package:" + getPackageName()))));
     title("隐私");
-    content.addView(text("屏幕图像只在内存中处理，不保存、不上传。OCR 模型与读音词典随 APK 内置。停止辅助即释放屏幕采集。", 14, 0xff566a70));
+    content.addView(text("屏幕图像只在内存中处理，不保存、不上传。OCR 模型与读音词典随 APK 内置。停止辅助即释放屏幕采集。", 14, Ui.MUTED));
   }
 
   private void addChoice(String label, String[] options, String key, int def) {
-    content.addView(text(label, 14, 0xff566a70));
+    content.addView(text(label, 14, Ui.MUTED));
     Spinner s = new Spinner(this);
-    s.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, options));
+    s.setAdapter(choices(options));
     s.setSelection(Prefs.get(this).getInt(key, def));
     s.setOnItemSelectedListener(
         new SimpleSelection() {
