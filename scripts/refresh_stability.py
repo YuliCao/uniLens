@@ -9,6 +9,8 @@ import time
 parser = argparse.ArgumentParser()
 parser.add_argument("--adb", required=True)
 parser.add_argument("--serial", default="emulator-5554")
+parser.add_argument("--mode", choices=["kana", "romaji"], default="kana",
+                    help="The preceding smoke test must leave the session in romaji mode")
 args = parser.parse_args()
 assert args.serial.startswith("emulator-")
 
@@ -21,10 +23,11 @@ def state():
 def number(s, key):
     return int(re.search(rf"{key}=(\d+)", s)[1])
 
-# The smoke test finishes in romaji mode. Kana is the strongest self-OCR regression.
-initial = state()
-x, y = re.search(r"control=1,(\d+),(\d+)", initial).groups()
-adb("shell", "input", "tap", x, y)
+# The smoke test finishes in romaji mode. Kana also exercises self-OCR masking.
+if args.mode == "kana":
+    initial = state()
+    x, y = re.search(r"control=1,(\d+),(\d+)", initial).groups()
+    adb("shell", "input", "tap", x, y)
 time.sleep(4)
 initial = state()
 blank = number(initial, "blankTransitions")
@@ -40,9 +43,10 @@ while time.monotonic() < deadline:
     samples.append({"labels": count, "ocrRuns": number(s, "ocrRuns")})
     time.sleep(.15)
 assert samples[-1]["ocrRuns"] >= first_scan + 3, samples
-result = {"durationSeconds": 25, "samples": len(samples), "mode": "kana",
+result = {"durationSeconds": 25, "samples": len(samples), "mode": args.mode,
           "blankTransitionsDuringRefresh": 0, "overlayAlwaysVisible": True,
           "borderAlwaysVisible": True, "completedOcrRuns": samples[-1]["ocrRuns"] - first_scan}
-output = Path(__file__).resolve().parents[1] / "artifacts/validation/refresh-stability.json"
+filename = "refresh-stability.json" if args.mode == "kana" else "refresh-stability-romaji.json"
+output = Path(__file__).resolve().parents[1] / "artifacts/validation" / filename
 output.write_text(json.dumps(result, indent=2), encoding="utf-8")
 print(json.dumps(result))

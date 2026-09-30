@@ -61,27 +61,42 @@ public final class Romaji {
   }
 
   public static String convert(String source) {
+    return convert(source, false);
+  }
+
+  /** Reading aid: kana syllables separated by middle dots; foreign text stays intact. */
+  public static String convertSeparated(String source) {
+    return convert(source, true);
+  }
+
+  private static String convert(String source, boolean separated) {
     String s = hiragana(source);
     StringBuilder out = new StringBuilder();
     boolean geminate = false;
+    boolean kanaBefore = false;
     for (int i = 0; i < s.length(); i++) {
       char c = s.charAt(i);
       if (c == 'っ') {
-        if (geminate) out.append("' ");
+        if (geminate) {
+          out.append("' ");
+          kanaBefore = false;
+        }
         geminate = true;
         continue;
       }
       if (c == 'ー') {
         char vowel = 0;
-        for (int j = out.length() - 1; j >= 0; j--) {
+        // In separated mode a long mark belongs only to an immediately preceding vowel.
+        for (int j = out.length() - 1; j >= 0 && (!separated || kanaBefore); j--) {
           char v = out.charAt(j);
           if ("aeiou".indexOf(v) >= 0) {
             vowel = v;
             break;
           }
-          if (!Character.isLetter(v)) break;
+          if (separated || !Character.isLetter(v)) break;
         }
         out.append(vowel == 0 ? 'ー' : vowel);
+        if (vowel == 0) kanaBefore = false;
         continue;
       }
       String key = s.substring(i, i + 1), value = null;
@@ -90,7 +105,19 @@ public final class Romaji {
         if (value != null) i++;
       }
       if (value == null) value = MAP.get(key);
+      boolean kana = value != null;
       if (value == null) value = key;
+      char previous = out.length() == 0 ? 0 : out.charAt(out.length() - 1);
+      boolean join =
+          separated
+              && kanaBefore
+              && !geminate
+              && (c == 'ん' && "aeiou".indexOf(previous) >= 0
+                  || value.length() == 1
+                      && "aeiou".indexOf(previous) >= 0
+                      && (previous == value.charAt(0)
+                          || previous == 'o' && value.equals("u")
+                          || previous == 'e' && value.equals("i")));
       if (geminate) {
         if (value.startsWith("ch")) out.append('t');
         else if ("bcdfghjklmpqrstvwxyz".indexOf(value.charAt(0)) >= 0 && !value.startsWith("n"))
@@ -98,8 +125,10 @@ public final class Romaji {
         else out.append('’');
         geminate = false;
       }
+      if (separated && kana && kanaBefore && !join) out.append('·');
       out.append(value);
-      if (c == 'ん' && i + 1 < s.length()) {
+      kanaBefore = kana;
+      if (!separated && c == 'ん' && i + 1 < s.length()) {
         String next = MAP.get(s.substring(i + 1, i + 2));
         if (next != null && "aeiouy".indexOf(next.charAt(0)) >= 0) out.append('\'');
       }

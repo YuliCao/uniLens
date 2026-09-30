@@ -1,3 +1,16 @@
+## 0.3.2 罗马音音节分隔
+
+日期：2026-09-30。验证环境为 Android 15 / API 35 x86_64 模拟器。
+
+- 罗马音、原文对照及离线试读使用 `·` 分隔；保留词间空格、括号与标点。`日本語 → ni·hon·go`、`東京 → tou·kyou`、`学校 → gak·kou`、`抹茶 → mat·cha`。拗音不拆开，拨音与促音归入前节；长音保留显式元音。相邻相同元音及 `ou / ei` 默认合并，是阅读分隔规则，不能完全判断词素内部的元音边界。
+- 英文数字保持完整；专名纠音、助词和跨分词边界的促音使用相同规则。标注换行优先使用词间空格，其次使用音节边界。
+- 30/30 JVM 测试通过，包含新增音节、长音、促音、拨音、外来语、标点与缓存回归。构建、Lint 通过（0 errors / 15 warnings）。
+- 关闭 Wi-Fi 与移动数据后，bundled OCR + 词典设备测试 2/2 通过（14.217 秒），直接检查识别后的 `ni·hon·go` 与 `tou·kyou`。见 `offline-032.log`。
+- 默认框选、区域重选、横竖屏、暂停恢复、三种模式及底层按钮切页通过；人工查看分隔符与换行截图。见 `smoke-032.json`、`syllables-romaji.png`、`syllables-original.png`。
+- 独立外部测试应用两页各四行的识别位置、点击穿透及停止释放 MediaProjection 通过；崩溃缓冲为空。见 `cross-app-032.json`。
+- 分隔罗马音模式连续 25 秒、129 次采样、完成 8 次 OCR；刷新期间清空标注次数增量为 0，标注与边框始终可见。见 `refresh-stability-romaji.json`。命令：`python scripts/refresh_stability.py --adb .tools/android-sdk/platform-tools/adb.exe --mode romaji`，前置是 `emulator_smoke.py --keep-running`。
+- ARM64 与通用 APK 的 v2 签名验证通过，ARM64 包通过 16 KB ZIP 对齐检查；模拟器安装包与通用交付 APK 的 SHA256 一致。新版未在物理 vivo 手机上实测。
+
 ## 0.3.1 简洁 UI 更新
 
 - 统一浅色背景、青绿强调色、圆角按钮与卡片；试读、专名纠音、后台及隐私说明可展开/收起。

@@ -67,8 +67,8 @@ public class OfflinePipelineTest {
       Text result = Tasks.await(ocr.process(InputImage.fromBitmap(b, 0)), 30, TimeUnit.SECONDS);
       assertTrue(result.getText(), result.getText().contains("日本語"));
       ReadingEngine.Reading reading = new ReadingEngine().read(result.getText());
-      assertTrue(reading.romaji, reading.romaji.contains("nihongo"));
-      assertTrue(reading.romaji, reading.romaji.contains("toukyou"));
+      assertTrue(reading.romaji, reading.romaji.contains("ni·hon·go"));
+      assertTrue(reading.romaji, reading.romaji.contains("tou·kyou"));
       assertFalse(result.getTextBlocks().isEmpty());
       assertNotNull(result.getTextBlocks().get(0).getBoundingBox());
     } finally {

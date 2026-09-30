@@ -1,0 +1,9 @@
+{
+  "durationSeconds": 25,
+  "samples": 129,
+  "mode": "romaji",
+  "blankTransitionsDuringRefresh": 0,
+  "overlayAlwaysVisible": true,
+  "borderAlwaysVisible": true,
+  "completedOcrRuns": 8
+}

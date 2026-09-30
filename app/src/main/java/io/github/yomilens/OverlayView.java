@@ -204,6 +204,10 @@ final class OverlayView extends View {
       if (end < text.length()) {
         int space = text.lastIndexOf(' ', end);
         if (space > offset) end = space;
+        else {
+          int dot = text.lastIndexOf('·', end - 1);
+          if (dot > offset) end = dot + 1;
+        }
       }
       result.add(text.substring(offset, end));
       offset = end;

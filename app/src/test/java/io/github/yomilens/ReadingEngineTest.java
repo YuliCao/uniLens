@@ -20,16 +20,16 @@ public class ReadingEngineTest {
   public void geminationAcrossConjugationBoundary() {
     ReadingEngine engine = new ReadingEngine();
     String joined = engine.read("新しい仲間が加わった！").romaji;
-    assertTrue(joined, joined.contains("kuwawatta"));
+    assertTrue(joined, joined.contains("ku·wa·wat·ta"));
     String wait = engine.read("待ってください。").romaji;
-    assertTrue(wait, wait.contains("matte"));
+    assertTrue(wait, wait.contains("mat·te"));
   }
 
   @Test
   public void readsSentenceAndParticles() {
     ReadingEngine.Reading r = new ReadingEngine().read("私は東京へ行きます。");
     assertTrue(r.romaji, r.romaji.contains("wa"));
-    assertTrue(r.romaji, r.romaji.contains("toukyou e"));
+    assertTrue(r.romaji, r.romaji.contains("tou·kyou e"));
     assertFalse(r.uncertain);
   }
 
@@ -37,14 +37,14 @@ public class ReadingEngineTest {
   public void exactCustomName() {
     ReadingEngine e = new ReadingEngine();
     e.setOverrides("八重神子=やえみこ");
-    assertEquals("yaemiko", e.read("八重神子").romaji);
+    assertEquals("ya·e·mi·ko", e.read("八重神子").romaji);
     e.setOverrides("八重神子=やえしんし");
-    assertEquals("yaeshinshi", e.read("八重神子").romaji);
+    assertEquals("ya·e·shin·shi", e.read("八重神子").romaji);
   }
 
   @Test
   public void preservesLatinAndNumbers() {
-    assertTrue(new ReadingEngine().read("HP 100").romaji.contains("100"));
+    assertEquals("HP 100", new ReadingEngine().read("HP 100").romaji);
   }
 
   @Test
@@ -52,8 +52,8 @@ public class ReadingEngineTest {
     ReadingEngine e = new ReadingEngine();
     e.setOverrides("八重=やえ\n八重神子=やえみこ");
     ReadingEngine.Reading r = e.read("八重神子に会いました。");
-    assertTrue(r.romaji, r.romaji.startsWith("yaemiko ni"));
-    assertTrue(r.romaji, r.romaji.contains("aimashita"));
+    assertTrue(r.romaji, r.romaji.startsWith("ya·e·mi·ko ni"));
+    assertTrue(r.romaji, r.romaji.contains("a·i·ma·shi·ta"));
   }
 
   @Test
@@ -61,5 +61,14 @@ public class ReadingEngineTest {
     ReadingEngine.Reading r = new ReadingEngine().read("龯");
     assertTrue(r.uncertain);
     assertEquals("龯", r.romaji);
+  }
+
+  @Test
+  public void separatedReadingKeepsWordSpacesAndCachedPunctuation() {
+    ReadingEngine engine = new ReadingEngine();
+    ReadingEngine.Reading reading = engine.read("「日本語」（東京）！");
+    assertEquals("「ni·hon·go」（tou·kyou）！", reading.romaji);
+    assertSame(reading, engine.read(reading.original));
+    assertEquals("ni·hon·go o", engine.read("日本語を").romaji);
   }
 }

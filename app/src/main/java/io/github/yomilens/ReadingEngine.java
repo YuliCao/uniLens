@@ -70,7 +70,7 @@ public final class ReadingEngine {
       }
       String k = Romaji.hiragana(overrides.get(match));
       kana.append(k);
-      append(romaji, Romaji.convert(k), true);
+      append(romaji, Romaji.convertSeparated(k), true);
       index += match.length();
       start = index;
     }
@@ -145,7 +145,7 @@ public final class ReadingEngine {
 
   private static void flushGroup(StringBuilder out, StringBuilder group) {
     if (group.length() == 0) return;
-    append(out, Romaji.convert(group.toString()), true);
+    append(out, Romaji.convertSeparated(group.toString()), true);
     group.setLength(0);
   }
 }
