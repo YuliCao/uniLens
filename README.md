@@ -6,6 +6,27 @@
 
 已在 Android 15 模拟器完成扫描、框选、横竖屏、点击穿透和停止释放验证；尚无 vivo 真机结果。
 
+## 界面与使用场景
+
+以下为 Android 模拟器实际运行截图。首页、全屏阅读、框选阅读和横屏截图来自 0.4.1 验证；阅读内容为自制日语测试页面。
+
+| 应用首页 | 全屏阅读 | 指定区域阅读 |
+| :---: | :---: | :---: |
+| <img src="artifacts/validation/home-041.png" alt="uniLens 0.4.1 首页：粉白配色、开始扫描及字号设置" width="260"> | <img src="artifacts/validation/portrait.png" alt="全屏识别日语，在原文附近叠加按音节分隔的罗马音" width="260"> | <img src="artifacts/validation/region-bottom.png" alt="仅识别绿色边框内的日语，框外不显示罗马音" width="260"> |
+| 开始扫描、调整字号和识别区域 | 罗马音与原文对照，悬浮条控制扫描 | 常显区域边框，只读取框内内容 |
+
+### 横屏阅读
+
+屏幕旋转后重新映射标注位置，适用于横屏阅读场景。
+
+<img src="artifacts/validation/landscape.png" alt="Android 横屏阅读测试：日语原文、罗马音标注及悬浮控制条" width="800">
+
+### 跨应用悬浮识别
+
+下图为此前版本在独立测试 App 中的实际识别截图，用于展示跨应用悬浮与点击穿透场景；控制条样式与当前版本不同。截图不代表已完成真实游戏、漫画或网页的效果验证。
+
+<img src="artifacts/validation/external-app.png" alt="在独立测试 App 上识别日语并显示罗马音的早期版本截图" width="300">
+
 ## 使用
 
 1. 首页点「允许悬浮窗」并授权，再点「开始扫描」，在系统对话框选择整个屏幕。
