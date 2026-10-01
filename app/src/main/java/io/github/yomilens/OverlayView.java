@@ -38,7 +38,7 @@ final class OverlayView extends View {
   private final RectF controlBounds = new RectF();
   private final RectF region = new RectF();
   private boolean dirty = true;
-  private int lastMode = -1, lastFont = -1;
+  private int lastFont = -1;
   private int blankTransitions = 0;
 
   OverlayView(Context c) {
@@ -109,10 +109,9 @@ final class OverlayView extends View {
   }
 
   private void ensureLayout() {
-    int mode = Prefs.mode(getContext()), font = Prefs.get(getContext()).getInt("font", 14);
-    if (dirty || mode != lastMode || font != lastFont) {
-      rebuild(mode, font);
-      lastMode = mode;
+    int font = Prefs.font(getContext());
+    if (dirty || font != lastFont) {
+      rebuild(font);
       lastFont = font;
       dirty = false;
     }
@@ -129,29 +128,29 @@ final class OverlayView extends View {
     ensureLayout();
     float density = getResources().getDisplayMetrics().density, pad = 4 * density;
     if (!region.isEmpty()) {
-      back.setColor(0xff20d8c0);
+      back.setColor(Ui.LIME);
       back.setStyle(Paint.Style.STROKE);
       back.setStrokeWidth(2 * density);
       canvas.drawRect(region, back);
       back.setStyle(Paint.Style.FILL);
     }
     for (Rendered item : rendered) {
-      back.setColor(0xdd10292f);
+      back.setColor(0xe62a2433);
       canvas.drawRoundRect(item.bounds, 4 * density, 4 * density, back);
       ink.setTextSize(item.size);
-      ink.setColor(item.label.reading.uncertain ? 0xffffcf7a : 0xffd3fff4);
+      ink.setColor(item.label.reading.uncertain ? 0xffffcf7a : 0xfff4eefc);
       float baseline = item.bounds.top + pad / 2 - ink.ascent();
       for (String row : item.rows) {
         canvas.drawText(row, item.bounds.left + pad, baseline, ink);
         baseline += item.spacing;
       }
-      back.setColor(0xaa70d6c7);
+      back.setColor(0xaac9a7f5);
       RectF b = item.label.box;
       canvas.drawRect(b.left, b.bottom, b.right, b.bottom + density, back);
     }
   }
 
-  private void rebuild(int mode, int font) {
+  private void rebuild(int font) {
     rendered.clear();
     if (getWidth() == 0 || getHeight() == 0) return;
     float density = getResources().getDisplayMetrics().density,
@@ -162,8 +161,7 @@ final class OverlayView extends View {
     if (!controlBounds.isEmpty()) obstacles.add(box(controlBounds));
     for (Label label : labels) {
       RectF b = label.box;
-      String value = mode == 1 ? label.reading.kana : label.reading.romaji;
-      if (mode == 2) value = label.reading.original + "  /  " + value;
+      String value = label.reading.romaji;
       if (value.isEmpty()) continue;
       ink.setTextSize(requested);
       float available =

@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class CaptureService extends Service {
   public static volatile boolean running = false;
-  public static volatile String status = "尚未启动 · 模型内置 / 离线运行";
+  public static volatile String status = "准备就绪 · 离线识别";
   private final Handler main = new Handler(Looper.getMainLooper());
   private HandlerThread thread;
   private Handler analysis;
@@ -47,8 +47,6 @@ public final class CaptureService extends Service {
   private volatile int generation = 0;
   private long lastOcrAt = 0;
   private final AtomicBoolean inFlight = new AtomicBoolean();
-  private String dictionary = "\u0000";
-  private int lastRegion = -1;
   private long scans = 0, skips = 0;
   private volatile long framesReceived = 0, lastOcrMs = 0;
   private volatile List<RectF> annotationMasks = Collections.emptyList();
@@ -83,7 +81,7 @@ public final class CaptureService extends Service {
     try {
       NotificationManager nm = getSystemService(NotificationManager.class);
       nm.createNotificationChannel(
-          new NotificationChannel("capture", "屏幕日语辅助", NotificationManager.IMPORTANCE_LOW));
+          new NotificationChannel("capture", "屏幕扫描", NotificationManager.IMPORTANCE_LOW));
       PendingIntent open =
           PendingIntent.getActivity(
               this,
@@ -99,8 +97,8 @@ public final class CaptureService extends Service {
       Notification n =
           new Notification.Builder(this, "capture")
               .setSmallIcon(io.github.yomilens.R.drawable.ic_lens)
-              .setContentTitle("YomiLens 正在辅助阅读")
-              .setContentText("屏幕只在本机处理 · 点停止结束采集")
+              .setContentTitle("uniLens 正在扫描屏幕")
+              .setContentText("离线识别 · 点停止结束扫描")
               .setContentIntent(open)
               .setOngoing(true)
               .addAction(new Notification.Action.Builder(null, "停止", stop).build())
@@ -143,7 +141,7 @@ public final class CaptureService extends Service {
               analysis);
       createOverlay();
       running = true;
-      status = "正在加载离线 OCR 与读音词典…";
+      status = "正在加载识别模型…";
       analysis.post(
           () -> {
             try {
@@ -153,7 +151,7 @@ public final class CaptureService extends Service {
               main.post(
                   () -> {
                     if (!stopped) {
-                      status = "运行中 · 等待日语画面";
+                      status = "扫描中 · 等待日语画面";
                       main.post(tick);
                     }
                   });
@@ -232,10 +230,10 @@ public final class CaptureService extends Service {
     controls.setOrientation(LinearLayout.HORIZONTAL);
     controls.setGravity(Gravity.CENTER_VERTICAL);
     controls.setPadding(dp(4), 0, dp(4), 0);
-    controls.setBackground(Ui.rounded(this, 0xf223403a, 18, 0));
+    controls.setBackground(Ui.rounded(this, Ui.PANEL, 18, 0));
     controls.setElevation(dp(4));
     info = new TextView(this);
-    info.setText("読 · 拖动");
+    info.setText("uni · 拖动");
     info.setTextColor(Color.WHITE);
     info.setTextSize(11);
     info.setPadding(dp(8), dp(10), dp(8), dp(10));
@@ -248,19 +246,13 @@ public final class CaptureService extends Service {
               generation++;
               pauseButton.setText(paused ? "继续" : "暂停");
               overlay.setLabels(Collections.emptyList());
-              status = paused ? "已暂停（屏幕共享仍开启）" : "运行中";
+              status = paused ? "已暂停" : "扫描中";
               if (!paused) {
                 lastSignature = null;
                 main.removeCallbacks(tick);
                 main.post(tick);
               }
             });
-    control(
-        "模式",
-        () -> {
-          Prefs.get(this).edit().putInt("mode", (Prefs.mode(this) + 1) % 3).apply();
-          overlay.invalidate();
-        });
     control("框选", this::selectRegion);
     control("×", this::stopSelf);
     controlParams =
@@ -430,18 +422,10 @@ public final class CaptureService extends Service {
       }
       restore();
       int[] signature = signature(bitmap);
-      String nextDictionary = Prefs.get(this).getString("dictionary", "");
-      int nextRegion = Prefs.get(this).getInt("region", 3);
-      boolean dirty = !nextDictionary.equals(dictionary) || lastRegion != nextRegion;
-      if (!nextDictionary.equals(dictionary)) {
-        dictionary = nextDictionary;
-        readings.setOverrides(dictionary);
-      }
-      lastRegion = nextRegion;
-      int interval = Prefs.interval(this);
+      int interval = Prefs.INTERVAL;
       boolean unchanged = FrameDifference.similar(signature, lastSignature);
-      long maxIdle = interval == 350 ? 1500 : interval == 1500 ? 4000 : 2500;
-      if (!dirty && unchanged && SystemClock.elapsedRealtime() - lastOcrAt < maxIdle) {
+      long maxIdle = 2500;
+      if (unchanged && SystemClock.elapsedRealtime() - lastOcrAt < maxIdle) {
         stableFrames++;
         skips++;
         bitmap.recycle();
@@ -468,8 +452,7 @@ public final class CaptureService extends Service {
                               String value = line.getText();
                               Rect b = line.getBoundingBox();
                               if (b == null
-                                  || !JapaneseText.candidate(
-                                      value, Prefs.get(this).getBoolean("kanaOnly", false)))
+                                  || !JapaneseText.candidate(value, false))
                                 continue;
                               RectF box =
                                   new RectF(
@@ -490,22 +473,14 @@ public final class CaptureService extends Service {
                               () -> {
                                 if (stopped || current != generation || paused || selecting) return;
                                 overlay.setLabels(labels);
-                                info.setText("読 " + elapsed + "ms");
-                                status =
-                                    "运行中 · "
-                                        + labels.size()
-                                        + " 行 · OCR+读音 "
-                                        + elapsed
-                                        + " ms · 识别 "
-                                        + scans
-                                        + " / 跳过 "
-                                        + skips;
+                                info.setText("uni · " + labels.size() + " 行");
+                                status = "扫描中 · 识别到 " + labels.size() + " 行";
                               });
                         } catch (Exception e) {
                           fail(e);
                         } finally {
                           input.recycle();
-                          finishFrame(Prefs.interval(this));
+                          finishFrame(Prefs.INTERVAL);
                         }
                       }))
           .addOnFailureListener(
@@ -517,7 +492,7 @@ public final class CaptureService extends Service {
                         main.post(
                             () -> {
                               if (stopped || current != generation) return;
-                              status = "OCR 暂不可用：" + e.getMessage();
+                              status = "识别暂不可用：" + e.getMessage();
                             });
                         finishFrame(2000);
                       }));
@@ -560,7 +535,7 @@ public final class CaptureService extends Service {
   private void updateRegionBorder() {
     Rect r = region();
     overlay.setRegion(
-        Prefs.get(this).getInt("region", 3) == 3 && Prefs.get(this).contains("left")
+        Prefs.hasRegion(this)
             ? new RectF(
                 r.left * (float) screenW / captureW,
                 r.top * (float) screenH / captureH,
@@ -570,10 +545,7 @@ public final class CaptureService extends Service {
   }
 
   private Rect region() {
-    int mode = Prefs.get(this).getInt("region", 3);
-    if (mode == 1) return new Rect(0, captureH / 2, captureW, captureH);
-    if (mode == 2) return new Rect(0, captureH / 6, captureW, captureH * 5 / 6);
-    if (mode == 3) {
+    if (Prefs.hasRegion(this)) {
       android.content.SharedPreferences p = Prefs.get(this);
       int l = Math.max(0, Math.min(captureW - 1, (int) (p.getFloat("left", 0) * captureW))),
           t = Math.max(0, Math.min(captureH - 1, (int) (p.getFloat("top", 0) * captureH)));
@@ -631,12 +603,12 @@ public final class CaptureService extends Service {
           boolean down;
 
           protected void onDraw(Canvas c) {
-            c.drawColor(0x55304750);
+            c.drawColor(0x662a2433);
             p.setColor(Color.WHITE);
             p.setTextSize(dp(17));
-            c.drawText("拖动框选识别区域 · 轻点取消", dp(20), dp(64), p);
+            c.drawText("拖动框选要识别的区域 · 轻点取消", dp(20), dp(64), p);
             if (down) {
-              p.setColor(0xaa41dcc0);
+              p.setColor(Ui.LIME);
               p.setStyle(Paint.Style.STROKE);
               p.setStrokeWidth(dp(2));
               c.drawRect(Math.min(sx, ex), Math.min(sy, ey), Math.max(sx, ex), Math.max(sy, ey), p);
@@ -660,7 +632,6 @@ public final class CaptureService extends Service {
                 getLocationOnScreen(origin);
                 Prefs.get(CaptureService.this)
                     .edit()
-                    .putInt("region", 3)
                     .putFloat("left", (origin[0] + Math.min(sx, ex)) / screenW)
                     .putFloat("top", (origin[1] + Math.min(sy, ey)) / screenH)
                     .putFloat("right", (origin[0] + Math.max(sx, ex)) / screenW)
@@ -764,7 +735,7 @@ public final class CaptureService extends Service {
     android.util.Log.e("YomiLens", "Capture failure", e);
     main.post(
         () -> {
-          status = "辅助停止：" + e.getClass().getSimpleName() + " · " + e.getMessage();
+          status = "扫描停止：" + e.getClass().getSimpleName() + " · " + e.getMessage();
           Toast.makeText(this, status, Toast.LENGTH_LONG).show();
           stopSelf();
         });
@@ -791,7 +762,7 @@ public final class CaptureService extends Service {
           if (recognizer != null) recognizer.close();
           thread.quitSafely();
         });
-    if (!status.startsWith("辅助停止") && !status.startsWith("系统")) status = "已停止 · 屏幕采集已释放";
+    if (!status.startsWith("扫描停止") && !status.startsWith("系统")) status = "已停止";
     super.onDestroy();
   }
 

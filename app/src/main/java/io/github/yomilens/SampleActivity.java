@@ -1,7 +1,7 @@
 package io.github.yomilens;
 
 import android.app.Activity;
-import android.graphics.Color;
+import android.graphics.Typeface;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.widget.*;
@@ -21,37 +21,49 @@ public final class SampleActivity extends Activity {
     show();
   }
 
+  private Button button(String s, boolean main) {
+    Button b = new Button(this);
+    b.setText(s);
+    b.setAllCaps(false);
+    b.setTextSize(14);
+    b.setTextColor(main ? 0xffffffff : Ui.ACCENT);
+    b.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+    b.setBackground(Ui.button(this, main ? Ui.ACCENT : Ui.SOFT, 16, 0));
+    b.setStateListAnimator(null);
+    return b;
+  }
+
   private void show() {
+    int d = Ui.dp(this, 1);
     LinearLayout root = new LinearLayout(this);
     root.setOrientation(LinearLayout.VERTICAL);
     root.setGravity(Gravity.CENTER);
-    root.setPadding(30, 80, 30, 60);
-    root.setBackgroundColor(0xfffcf8ef);
-    TextView title = new TextView(this);
-    title.setText("YomiLens 识别测试 · " + (page + 1));
-    title.setTextColor(0xff167d8d);
-    title.setTextSize(16);
-    root.addView(title);
+    root.setPadding(24 * d, 48 * d, 24 * d, 32 * d);
+    root.setBackgroundColor(Ui.BACKGROUND);
     for (String line : pages[page]) {
       TextView t = new TextView(this);
       t.setText(line);
-      t.setTextColor(Color.BLACK);
+      t.setTextColor(Ui.INK);
       t.setTextSize(26);
-      t.setPadding(0, 38, 0, 38);
+      t.setPadding(0, 13 * d, 0, 13 * d);
       root.addView(t);
     }
-    Button next = new Button(this);
-    next.setText("下一页 · 验证点击穿透");
+    LinearLayout row = new LinearLayout(this);
+    LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(-1, 48 * d);
+    rowLp.topMargin = 16 * d;
+    root.addView(row, rowLp);
+    Button back = button("返回", false);
+    back.setOnClickListener(v -> finish());
+    row.addView(back, new LinearLayout.LayoutParams(0, -1, 1));
+    Button next = button("下一页", true);
     next.setOnClickListener(
         v -> {
           page = (page + 1) % pages.length;
           show();
         });
-    root.addView(next);
-    Button back = new Button(this);
-    back.setText("返回设置");
-    back.setOnClickListener(v -> finish());
-    root.addView(back);
+    LinearLayout.LayoutParams nextLp = new LinearLayout.LayoutParams(0, -1, 1);
+    nextLp.leftMargin = 10 * d;
+    row.addView(next, nextLp);
     setContentView(root);
   }
 }

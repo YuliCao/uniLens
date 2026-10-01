@@ -1,0 +1,10 @@
+{
+  "exclude_return": true,
+  "visible_difference": 13.474214409722222,
+  "excluded_difference": 0.0,
+  "click_through": true,
+  "did_not_activate": true,
+  "dpr": 1.5,
+  "sample_width_px": 450,
+  "passed": true
+}

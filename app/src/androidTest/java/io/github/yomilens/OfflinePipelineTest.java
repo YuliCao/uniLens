@@ -18,6 +18,14 @@ import org.junit.runner.RunWith;
 @RunWith(AndroidJUnit4.class)
 public class OfflinePipelineTest {
   @Test
+  public void emojiReadingsStaySeparatedOnAndroid() {
+    String text = "「日本語👨‍👩‍👧‍👦👍🏽🫠1️⃣東京」！";
+    ReadingEngine.Reading reading = new ReadingEngine().read(text);
+    assertEquals("「ni·hon·go ｜ tou·kyou」！", reading.romaji);
+    assertEquals(text, reading.original);
+  }
+
+  @Test
   public void compareCaptureResolutionLatency() throws Exception {
     TextRecognizer ocr =
         TextRecognition.getClient(new JapaneseTextRecognizerOptions.Builder().build());

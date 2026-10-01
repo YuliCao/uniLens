@@ -80,7 +80,12 @@ public final class ReadingEngine {
       append(romaji, part.romaji, true);
       uncertain |= part.uncertain;
     }
-    Reading result = new Reading(input, kana.toString(), romaji.toString(), uncertain);
+    Reading result =
+        new Reading(
+            input,
+            ReadingSymbols.format(kana.toString()),
+            ReadingSymbols.format(romaji.toString()),
+            uncertain);
     cache.put(input, result);
     return result;
   }

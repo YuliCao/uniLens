@@ -71,4 +71,23 @@ public class ReadingEngineTest {
     assertSame(reading, engine.read(reading.original));
     assertEquals("ni·hon·go o", engine.read("日本語を").romaji);
   }
+
+  @Test
+  public void emojiBoundaryPreservesBothReadingsAndOriginal() {
+    String input = "「日本語👨‍👩‍👧‍👦👍🏽🇯🇵❤️東京」！";
+    ReadingEngine engine = new ReadingEngine();
+    ReadingEngine.Reading reading = engine.read(input);
+    assertEquals("「ni·hon·go ｜ tou·kyou」！", reading.romaji);
+    assertEquals(input, reading.original);
+    assertSame(reading, engine.read(input));
+    assertFalse(reading.uncertain);
+  }
+
+  @Test
+  public void customNamesAndKeycapsUseTheSameBoundary() {
+    ReadingEngine engine = new ReadingEngine();
+    engine.setOverrides("八重神子=やえみこ");
+    assertEquals("ya·e·mi·ko ｜ ni·hon·go", engine.read("八重神子1️⃣日本語").romaji);
+    assertEquals("HP 100 ｜ MP 50", engine.read("HP 100★MP 50").romaji);
+  }
 }

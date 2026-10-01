@@ -1,0 +1,48 @@
+{
+  "offline_socket_blocked": true,
+  "phases": [
+    "ready",
+    "sample",
+    "select",
+    "recognition",
+    "resume",
+    "kana",
+    "parallel",
+    "dictionary",
+    "steady"
+  ],
+  "inference_s": [
+    1.2513361000019358,
+    0.5688981999992393,
+    0.614046499998949,
+    0.5191666000027908,
+    0.6033852999971714,
+    0.5314992999992683
+  ],
+  "passed": true,
+  "sample_readings": [
+    {
+      "original": "私は東京へ行きます。",
+      "kana": "わたくしはとうきょうへいきます。",
+      "romaji": "watakushi wa toukyou e ikimasu。",
+      "uncertain": false
+    },
+    {
+      "original": "新しい仲間が加わった!",
+      "kana": "あたらしいなかまがくわわった!",
+      "romaji": "atarashii nakama ga kuwawatta!",
+      "uncertain": false
+    },
+    {
+      "original": "[日本語」を読んでください。",
+      "kana": "[にほんご」をよんでください。",
+      "romaji": "[nihongo」o yonde kudasai。",
+      "uncertain": false
+    }
+  ],
+  "error": null,
+  "result_count": 15,
+  "ocr_count": 6,
+  "elapsed_s": 8.984007400002156,
+  "worker_stopped": true
+}

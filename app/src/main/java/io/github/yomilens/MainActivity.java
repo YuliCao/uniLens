@@ -3,6 +3,7 @@ package io.github.yomilens;
 import android.Manifest;
 import android.app.*;
 import android.content.*;
+import android.graphics.Outline;
 import android.graphics.Typeface;
 import android.media.projection.*;
 import android.net.Uri;
@@ -10,19 +11,18 @@ import android.os.*;
 import android.provider.Settings;
 import android.view.*;
 import android.widget.*;
-import java.util.concurrent.*;
 
 public final class MainActivity extends Activity {
   static volatile boolean visible = false;
-  private LinearLayout content, page, actions;
-  private TextView state, preview;
-  private final ExecutorService worker = Executors.newSingleThreadExecutor();
-  private ReadingEngine demoEngine;
+  private LinearLayout page;
+  private TextView state, regionText, fontPreview;
+  private View dot, regionReset;
+  private Button primary;
   private final Handler handler = new Handler(Looper.getMainLooper());
   private final Runnable refresh =
       new Runnable() {
         public void run() {
-          if (state != null) state.setText(CaptureService.status);
+          update();
           handler.postDelayed(this, 1000);
         }
       };
@@ -30,14 +30,11 @@ public final class MainActivity extends Activity {
   @Override
   public void onCreate(Bundle saved) {
     super.onCreate(saved);
-    if (!Prefs.get(this).getBoolean("regionDefaultV3", false)) {
-      Prefs.get(this).edit().putInt("region", 3).putBoolean("regionDefaultV3", true).apply();
-    }
     build();
   }
 
   private int dp(int n) {
-    return Math.round(n * getResources().getDisplayMetrics().density);
+    return Ui.dp(this, n);
   }
 
   private TextView text(String s, int size, int color) {
@@ -45,96 +42,31 @@ public final class MainActivity extends Activity {
     t.setText(s);
     t.setTextSize(size);
     t.setTextColor(color);
-    t.setPadding(0, dp(6), 0, dp(6));
     return t;
   }
 
-  private void title(String s) {
+  private LinearLayout card(int topMargin) {
     LinearLayout card = new LinearLayout(this);
     card.setOrientation(LinearLayout.VERTICAL);
-    card.setPadding(dp(16), dp(14), dp(16), dp(16));
-    card.setBackground(Ui.rounded(this, 0xffffffff, 20, Ui.LINE));
-    LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(-1, -2);
-    layout.topMargin = dp(16);
-    page.addView(card, layout);
-    LinearLayout header = new LinearLayout(this);
-    header.setGravity(Gravity.CENTER_VERTICAL);
-    TextView heading = text(s, 16, Ui.INK);
-    heading.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-    header.addView(heading, new LinearLayout.LayoutParams(0, dp(48), 1));
-    TextView arrow = text("＋", 20, Ui.MUTED);
-    arrow.setGravity(Gravity.CENTER);
-    arrow.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-    boolean collapsible = !s.equals("显示与响应") && !s.equals("屏幕辅助");
-    if (collapsible) header.addView(arrow, new LinearLayout.LayoutParams(dp(32), dp(48)));
-    card.addView(header);
-    content = new LinearLayout(this);
-    content.setOrientation(LinearLayout.VERTICAL);
-    card.addView(content);
-    if (collapsible) {
-      LinearLayout body = content;
-      body.setVisibility(View.GONE);
-      header.setBackground(Ui.button(this, 0xffffffff, 12, 0));
-      header.setContentDescription(s + "，展开");
-      header.setOnClickListener(
-          v -> {
-            boolean show = body.getVisibility() != View.VISIBLE;
-            body.setVisibility(show ? View.VISIBLE : View.GONE);
-            arrow.setText(show ? "−" : "＋");
-            header.setContentDescription(s + (show ? "，收起" : "，展开"));
-          });
-    }
+    card.setPadding(dp(18), dp(16), dp(18), dp(18));
+    card.setBackground(Ui.rounded(this, Ui.CARD, 22, Ui.LINE));
+    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+    lp.topMargin = dp(topMargin);
+    page.addView(card, lp);
+    return card;
   }
 
-  private Button button(String s, Runnable r) {
+  private Button button(String s, boolean main, Runnable r) {
     Button b = new Button(this);
     b.setText(s);
-    b.setTextSize(14);
+    b.setTextSize(main ? 16 : 14);
     b.setAllCaps(false);
-    b.setPadding(dp(12), 0, dp(12), 0);
-    boolean primary = s.equals("开始阅读");
-    b.setTextColor(primary ? 0xffffffff : Ui.ACCENT);
+    b.setTextColor(main ? Ui.PRIMARY_INK : Ui.ACCENT);
     b.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-    b.setBackground(Ui.button(this, primary ? Ui.ACCENT : Ui.SOFT, 14, 0));
-    b.setElevation(0);
+    b.setBackground(Ui.button(this, main ? Ui.PINK : Ui.SOFT, 16, 0));
     b.setStateListAnimator(null);
     b.setOnClickListener(v -> r.run());
-    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(primary ? 54 : 48));
-    lp.topMargin = dp(8);
-    if (s.equals("停止辅助") || s.equals("识别测试")) {
-      if (actions == null) {
-        actions = new LinearLayout(this);
-        content.addView(actions);
-      }
-      lp.width = 0;
-      lp.weight = 1;
-      if (actions.getChildCount() > 0) lp.leftMargin = dp(8);
-      actions.addView(b, lp);
-    } else content.addView(b, lp);
     return b;
-  }
-
-  private void field(EditText input) {
-    input.setTextSize(15);
-    input.setTextColor(Ui.INK);
-    input.setHintTextColor(Ui.MUTED);
-    input.setPadding(dp(12), dp(12), dp(12), dp(12));
-    input.setBackground(Ui.rounded(this, Ui.SOFT, 12, 0));
-  }
-
-  private ArrayAdapter<String> choices(String[] options) {
-    return new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, options) {
-      @Override
-      public View getView(int position, View convert, ViewGroup parent) {
-        TextView view = (TextView) super.getView(position, convert, parent);
-        view.setTextSize(14);
-        view.setTextColor(Ui.INK);
-        view.setGravity(Gravity.CENTER_VERTICAL);
-        view.setPadding(dp(10), 0, dp(24), 0);
-        view.setMinHeight(dp(48));
-        return view;
-      }
-    };
   }
 
   private void build() {
@@ -142,183 +74,177 @@ public final class MainActivity extends Activity {
     scroll.setFillViewport(true);
     scroll.setBackgroundColor(Ui.BACKGROUND);
     scroll.setVerticalScrollBarEnabled(false);
-    content = new LinearLayout(this);
-    content.setOrientation(LinearLayout.VERTICAL);
-    content.setPadding(dp(24), dp(24), dp(24), dp(32));
-    page = content;
+    page = new LinearLayout(this);
+    page.setOrientation(LinearLayout.VERTICAL);
+    page.setPadding(dp(22), dp(20), dp(22), dp(28));
     scroll.addView(page);
     setContentView(scroll);
-    content.setPadding(dp(24), dp(16), dp(24), dp(24));
-    scroll.setClipToPadding(true);
     scroll.setOnApplyWindowInsetsListener(
         (v, insets) -> {
           v.setPadding(0, insets.getSystemWindowInsetTop(), 0, insets.getSystemWindowInsetBottom());
           return insets;
         });
-    TextView badge = text("YOMILENS  /  日语透镜", 12, Ui.ACCENT);
-    badge.setLetterSpacing(.1f);
-    content.addView(badge);
-    TextView hero = text("让日语，读得出来。", 26, Ui.INK);
-    hero.setTypeface(null, Typeface.BOLD);
-    content.addView(hero);
-    content.addView(text("圈选日语，即刻读音。全程离线处理。", 14, Ui.MUTED));
-    title("屏幕辅助");
-    state = text(CaptureService.status, 12, Ui.MUTED);
-    state.setMinHeight(dp(36));
-    content.addView(state);
-    button(
-        "悬浮显示权限",
-        () ->
-            startActivity(
-                new Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:" + getPackageName()))));
-    button("开始阅读", this::startCapture);
-    button(
-        "停止辅助",
-        () -> {
-          stopService(new Intent(this, CaptureService.class));
-          CaptureService.status = "已停止";
-          state.setText(CaptureService.status);
-        });
-    button("识别测试", () -> startActivity(new Intent(this, SampleActivity.class)));
-    title("显示与响应");
-    addChoice("标注模式", new String[] {"罗马音", "振假名（平假名）", "原文 + 罗马音"}, "mode", 0);
-    addChoice("扫描区域", new String[] {"全屏", "下半屏（游戏对话）", "中部（漫画 / 网页）", "框选区域（手动选择）"}, "region", 3);
-    CheckBox kanaOnly = new CheckBox(this);
-    kanaOnly.setText("只标注含假名的行（略过纯汉字菜单）");
-    kanaOnly.setTextSize(13);
-    kanaOnly.setTextColor(Ui.MUTED);
-    kanaOnly.setMinHeight(dp(48));
-    kanaOnly.setChecked(Prefs.get(this).getBoolean("kanaOnly", false));
-    kanaOnly.setOnCheckedChangeListener(
-        (button, checked) -> Prefs.get(this).edit().putBoolean("kanaOnly", checked).apply());
-    content.addView(kanaOnly);
-    TextView speedLabel = text("识别频率：静止画面自动降频", 14, Ui.MUTED);
-    content.addView(speedLabel);
-    Spinner speed = new Spinner(this);
-    speed.setAdapter(choices(new String[] {"快速 · 0.35 秒间隔", "均衡 · 0.75 秒间隔", "省电 · 1.5 秒间隔"}));
-    int val = Prefs.interval(this);
-    speed.setSelection(val == 350 ? 0 : val == 1500 ? 2 : 1);
-    speed.setOnItemSelectedListener(
-        new SimpleSelection() {
-          public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
-            Prefs.get(MainActivity.this)
-                .edit()
-                .putInt("interval", new int[] {350, 750, 1500}[pos])
-                .apply();
+
+    // Header: avatar + name.
+    LinearLayout header = new LinearLayout(this);
+    header.setGravity(Gravity.CENTER_VERTICAL);
+    ImageView avatar = new ImageView(this);
+    avatar.setImageResource(R.drawable.uni_avatar);
+    avatar.setScaleType(ImageView.ScaleType.CENTER_CROP);
+    avatar.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+    avatar.setBackground(Ui.rounded(this, Ui.SOFT, 32, 0));
+    avatar.setOutlineProvider(
+        new ViewOutlineProvider() {
+          public void getOutline(View v, Outline o) {
+            o.setOval(0, 0, v.getWidth(), v.getHeight());
           }
         });
-    content.addView(speed);
-    content.addView(text("标注字号", 14, Ui.MUTED));
+    avatar.setClipToOutline(true);
+    header.addView(avatar, new LinearLayout.LayoutParams(dp(64), dp(64)));
+    LinearLayout names = new LinearLayout(this);
+    names.setOrientation(LinearLayout.VERTICAL);
+    names.setPadding(dp(14), 0, 0, 0);
+    TextView name = text("uniLens", 24, Ui.INK);
+    name.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+    names.addView(name);
+    names.addView(text("识别屏幕指定区域中的日语，返回罗马音", 13, Ui.MUTED));
+    header.addView(names, new LinearLayout.LayoutParams(0, -2, 1));
+    page.addView(header);
+
+    // Main card: status + actions.
+    LinearLayout main = card(22);
+    LinearLayout status = new LinearLayout(this);
+    status.setGravity(Gravity.CENTER_VERTICAL);
+    dot = new View(this);
+    LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(dp(8), dp(8));
+    dotLp.rightMargin = dp(8);
+    status.addView(dot, dotLp);
+    state = text("", 13, Ui.MUTED);
+    status.addView(state, new LinearLayout.LayoutParams(0, -2, 1));
+    status.setMinimumHeight(dp(32));
+    main.addView(status);
+    TextView sample = text("日本語 → ni·hon·go", 20, Ui.INK);
+    sample.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+    sample.setPadding(0, dp(10), 0, dp(14));
+    main.addView(sample);
+    primary = button("开始扫描", true, this::onPrimary);
+    main.addView(primary, new LinearLayout.LayoutParams(-1, dp(56)));
+    LinearLayout row = new LinearLayout(this);
+    LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(-1, dp(48));
+    rowLp.topMargin = dp(10);
+    main.addView(row, rowLp);
+    row.addView(
+        button(
+            "停止",
+            false,
+            () -> {
+              stopService(new Intent(this, CaptureService.class));
+              CaptureService.status = "已停止";
+              update();
+            }),
+        new LinearLayout.LayoutParams(0, -1, 1));
+    LinearLayout.LayoutParams second = new LinearLayout.LayoutParams(0, -1, 1);
+    second.leftMargin = dp(10);
+    row.addView(
+        button("效果预览", false, () -> startActivity(new Intent(this, SampleActivity.class))),
+        second);
+
+    // Display settings.
+    LinearLayout settings = card(14);
+    LinearLayout regionRow = new LinearLayout(this);
+    regionRow.setGravity(Gravity.CENTER_VERTICAL);
+    regionText = text("", 14, Ui.INK);
+    regionRow.addView(regionText, new LinearLayout.LayoutParams(0, dp(48), 1));
+    regionText.setGravity(Gravity.CENTER_VERTICAL);
+    Button reset =
+        button(
+            "改为全屏",
+            false,
+            () -> {
+              Prefs.clearRegion(this);
+              update();
+            });
+    reset.setTextSize(13);
+    reset.setPadding(dp(14), 0, dp(14), 0);
+    regionReset = reset;
+    regionRow.addView(reset, new LinearLayout.LayoutParams(-2, dp(40)));
+    settings.addView(regionRow);
+    settings.addView(text("扫描中点悬浮条「框选」可只读一块区域。", 12, Ui.MUTED));
+    View divider = new View(this);
+    divider.setBackgroundColor(Ui.LINE);
+    LinearLayout.LayoutParams divLp = new LinearLayout.LayoutParams(-1, 1);
+    divLp.topMargin = dp(14);
+    divLp.bottomMargin = dp(10);
+    settings.addView(divider, divLp);
+    LinearLayout fontRow = new LinearLayout(this);
+    fontRow.setGravity(Gravity.CENTER_VERTICAL);
+    fontRow.addView(text("罗马音字号", 14, Ui.INK), new LinearLayout.LayoutParams(0, -2, 1));
+    fontPreview = text("", 13, Ui.MUTED);
+    fontRow.addView(fontPreview);
+    settings.addView(fontRow);
     SeekBar size = new SeekBar(this);
+    size.setContentDescription("罗马音字号");
     size.setMax(18);
-    size.setProgress(Prefs.get(this).getInt("font", 14) - 10);
+    size.setProgress(Prefs.font(this) - 10);
+    size.setMinimumHeight(dp(48));
     size.setOnSeekBarChangeListener(
         new SeekBar.OnSeekBarChangeListener() {
           public void onProgressChanged(SeekBar s, int p, boolean user) {
             if (user) Prefs.get(MainActivity.this).edit().putInt("font", p + 10).apply();
+            fontPreview.setText((p + 10) + " sp");
           }
 
           public void onStartTrackingTouch(SeekBar s) {}
 
           public void onStopTrackingTouch(SeekBar s) {}
         });
-    content.addView(size);
-    title("试读一句日语");
-    EditText sample = new EditText(this);
-    sample.setText("今日は日本語を勉強します。東京へ行きます。");
-    sample.setMinLines(2);
-    field(sample);
-    content.addView(sample);
-    preview = text("在这里检查离线读音。", 16, Ui.INK);
-    preview.setTextIsSelectable(true);
-    button(
-        "生成读音",
-        () -> {
-          preview.setText("正在载入离线词典…");
-          String input = sample.getText().toString(),
-              dict = Prefs.get(this).getString("dictionary", "");
-          worker.execute(
-              () -> {
-                try {
-                  if (demoEngine == null) demoEngine = new ReadingEngine();
-                  demoEngine.setOverrides(dict);
-                  ReadingEngine.Reading r = demoEngine.read(input);
-                  runOnUiThread(
-                      () ->
-                          preview.setText(
-                              r.kana
-                                  + "\n\n"
-                                  + r.romaji
-                                  + (r.uncertain ? "\n含未收录汉字，请添加专名纠音。" : "")));
-                } catch (Exception e) {
-                  runOnUiThread(() -> preview.setText("词典加载失败：" + e.getMessage()));
-                }
-              });
-        });
-    content.addView(preview);
-    title("专名纠音");
-    content.addView(text("每行一项：原文=假名。句中按最长专名优先匹配，最多 500 项。", 13, Ui.MUTED));
-    EditText dict = new EditText(this);
-    dict.setHint("八重神子=やえみこ\n原神=げんしん");
-    dict.setMinLines(3);
-    dict.setGravity(Gravity.TOP);
-    dict.setText(Prefs.get(this).getString("dictionary", ""));
-    field(dict);
-    content.addView(dict);
-    button(
-        "保存纠音词典",
-        () -> {
-          Prefs.get(this).edit().putString("dictionary", dict.getText().toString()).apply();
-          Toast.makeText(this, "已保存，下一轮识别生效", Toast.LENGTH_SHORT).show();
-        });
-    title("vivo 后台使用");
-    content.addView(
+    fontPreview.setText(Prefs.font(this) + " sp");
+    settings.addView(size);
+
+    // Footnote.
+    TextView note =
         text(
-            "在系统设置中允许悬浮窗、通知和后台高耗电运行，并允许自启动；必要时在最近任务中锁定本应用。不同 OriginOS / Funtouch OS 的入口可能不同。\n\n"
-                + "开始时请选择「整个屏幕」。系统每次开始都需要确认屏幕共享。标注层不接收触摸；小控制条可拖动、暂停和框选。\n\n"
-                + "本版按文字行标注，竖排、花体、极小文字及专有名词可能误识别。受保护视频、银行或禁止截屏的页面无法识别。",
-            14,
-            Ui.MUTED));
-    button(
-        "打开应用系统设置",
-        () ->
+            "全程离线识别，屏幕画面不保存、不上传。若扫描被系统中断，请在应用设置中允许悬浮窗与后台运行。",
+            12,
+            Ui.MUTED);
+    note.setLineSpacing(dp(2), 1);
+    LinearLayout.LayoutParams noteLp = new LinearLayout.LayoutParams(-1, -2);
+    noteLp.topMargin = dp(18);
+    page.addView(note, noteLp);
+    TextView appSettings = text("打开应用设置", 13, Ui.ACCENT);
+    appSettings.setGravity(Gravity.CENTER_VERTICAL);
+    appSettings.setMinHeight(dp(48));
+    appSettings.setOnClickListener(
+        v ->
             startActivity(
                 new Intent(
                     Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                     Uri.parse("package:" + getPackageName()))));
-    title("隐私");
-    content.addView(text("屏幕图像只在内存中处理，不保存、不上传。OCR 模型与读音词典随 APK 内置。停止辅助即释放屏幕采集。", 14, Ui.MUTED));
+    page.addView(appSettings);
   }
 
-  private void addChoice(String label, String[] options, String key, int def) {
-    content.addView(text(label, 14, Ui.MUTED));
-    Spinner s = new Spinner(this);
-    s.setAdapter(choices(options));
-    s.setSelection(Prefs.get(this).getInt(key, def));
-    s.setOnItemSelectedListener(
-        new SimpleSelection() {
-          public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
-            Prefs.get(MainActivity.this).edit().putInt(key, pos).apply();
-          }
-        });
-    content.addView(s);
+  private void update() {
+    if (state == null) return;
+    boolean permitted = Settings.canDrawOverlays(this);
+    state.setText(permitted ? CaptureService.status : "需要先允许悬浮窗，才能在其他应用上显示罗马音");
+    dot.setBackground(
+        Ui.rounded(this, CaptureService.running ? Ui.LIME : permitted ? Ui.LINE : 0xffe8a54b, 4, 0));
+    primary.setText(!permitted ? "允许悬浮窗" : CaptureService.running ? "扫描中" : "开始扫描");
+    primary.setEnabled(!CaptureService.running || !permitted);
+    primary.setAlpha(primary.isEnabled() ? 1f : .6f);
+    boolean region = Prefs.hasRegion(this);
+    regionText.setText(region ? "识别区域：已框选" : "识别区域：全屏");
+    regionReset.setVisibility(region ? View.VISIBLE : View.GONE);
   }
 
-  private abstract static class SimpleSelection implements AdapterView.OnItemSelectedListener {
-    public void onNothingSelected(AdapterView<?> p) {}
-  }
-
-  private void startCapture() {
+  private void onPrimary() {
     if (!Settings.canDrawOverlays(this)) {
-      Toast.makeText(this, "请先允许悬浮显示", Toast.LENGTH_LONG).show();
+      startActivity(
+          new Intent(
+              Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName())));
       return;
     }
-    if (CaptureService.running) {
-      Toast.makeText(this, "辅助已经运行，请使用悬浮控制条", Toast.LENGTH_SHORT).show();
-      return;
-    }
+    if (CaptureService.running) return;
     if (Build.VERSION.SDK_INT >= 33
         && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
             != android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -369,11 +295,5 @@ public final class MainActivity extends Activity {
     visible = false;
     handler.removeCallbacks(refresh);
     super.onPause();
-  }
-
-  @Override
-  protected void onDestroy() {
-    worker.shutdown();
-    super.onDestroy();
   }
 }
