@@ -109,7 +109,16 @@ if not args.external_only:
     find("识别测试", tap=True)
     time.sleep(2)
     state = adb("shell", "dumpsys", "activity", "service", "io.github.yomilens/.CaptureService")
-    assert "selecting=true" in state, "Default region selector did not open: " + state
+    assert "selecting=false" in state and "paused=false" in state, "Unexpected startup selector: " + state
+    screenshot("startup-without-selector")
+    events.append({"startupSelectorSuppressed": True, "unselectedRegionReadsFullScreen": True})
+    control(2)
+    adb("shell", "input", "tap", "500", "900")
+    state = adb("shell", "dumpsys", "activity", "service", "io.github.yomilens/.CaptureService")
+    assert "selecting=false" in state and "paused=false" in state, "Cancelling selection paused reading: " + state
+    control(2)
+    state = adb("shell", "dumpsys", "activity", "service", "io.github.yomilens/.CaptureService")
+    assert "selecting=true" in state, "Manual selector did not open: " + state
     adb("shell", "input", "swipe", "10", "80", "1070", "1850", "700")
     find("日本語を勉強します。")
     time.sleep(7)
@@ -168,6 +177,20 @@ if not args.keep_running:
     projection = adb("shell", "dumpsys", "media_projection")
     assert "io.github.yomilens" not in projection, projection
     events.append({"projectionReleased": True})
+    if not args.external_fixture:
+        find("开始阅读", tap=True)
+        find("Start", tap=True)
+        find("识别测试", tap=True)
+        time.sleep(2)
+        state = adb("shell", "dumpsys", "activity", "service", "io.github.yomilens/.CaptureService")
+        assert "selecting=false" in state and "paused=false" in state and "regionBorder=true" in state, state
+        screenshot("restart-saved-region")
+        events.append({"restartUsesSavedRegion": True, "restartSelectorSuppressed": True})
+        find("返回设置", tap=True)
+        find("停止辅助", tap=True)
+        time.sleep(1)
+        projection = adb("shell", "dumpsys", "media_projection")
+        assert "io.github.yomilens" not in projection, projection
 crashes = adb("logcat", "-b", "crash", "-d")
 (output / "crashes.txt").write_text(crashes, encoding="utf-8")
 assert "Process: io.github.yomilens" not in crashes, crashes

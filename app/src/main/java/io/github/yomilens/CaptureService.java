@@ -52,7 +52,6 @@ public final class CaptureService extends Service {
   private long scans = 0, skips = 0;
   private volatile long framesReceived = 0, lastOcrMs = 0;
   private volatile List<RectF> annotationMasks = Collections.emptyList();
-  private boolean needsSelection = true;
   private volatile long sampledFrameAgeMs = 0;
   // Discard animation/letterboxed frames while the display and capture surface settle.
   private volatile long geometryReadyNanos;
@@ -331,12 +330,6 @@ public final class CaptureService extends Service {
     }
     if (!inFlight.compareAndSet(false, true)) {
       schedule(100);
-      return;
-    }
-    if (needsSelection && Prefs.get(this).getInt("region", 3) == 3) {
-      inFlight.set(false);
-      needsSelection = false;
-      selectRegion();
       return;
     }
     updateRegionBorder();
@@ -695,13 +688,6 @@ public final class CaptureService extends Service {
       selector = null;
     }
     selecting = false;
-    needsSelection = false;
-    if (!Prefs.get(this).contains("left") && Prefs.get(this).getInt("region", 3) == 3) {
-      paused = true;
-      needsSelection = true;
-      pauseButton.setText("继续");
-      status = "尚未框选 · 点继续或框选选择区域";
-    }
     updateRegionBorder();
     lastSignature = null;
     controls.setVisibility(View.VISIBLE);
